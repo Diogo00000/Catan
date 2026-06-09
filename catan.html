@@ -290,6 +290,16 @@
   <div class="modal trade-modal" id="tradeModal"></div>
 </div>
 
+<!-- Discard dialog (when a 7 is rolled) -->
+<div class="overlay hidden" id="discardOverlay">
+  <div class="modal trade-modal" id="discardModal"></div>
+</div>
+
+<!-- Steal-target dialog (when several rivals border the robber's hex) -->
+<div class="overlay hidden" id="stealOverlay">
+  <div class="modal trade-modal" id="stealModal"></div>
+</div>
+
 <script>
 "use strict";
 const SVGNS="http://www.w3.org/2000/svg";
@@ -614,18 +624,29 @@ function commitCity(vid){
   S.mode=null; recomputeVP(); checkWin(); renderAll();
 }
 function commitRobber(hi){
-  S.robberHex=hi; S.pendingRobber=false; S.mode=null;
-  // steal from a random adjacent opponent who has cards
-  const victims=[...new Set(hexes[hi].corners.map(v=>S.buildings[v]).filter(b=>b&&b.player!==S.cur).map(b=>b.player))]
-    .filter(p=>totalCards(p)>0);
-  if(victims.length){
-    const v=victims[Math.floor(Math.random()*victims.length)];
-    const pool=[]; RES_ORDER.forEach(r=>{for(let k=0;k<S.players[v].resources[r];k++)pool.push(r);});
-    const r=pool[Math.floor(Math.random()*pool.length)];
-    S.players[v].resources[r]--; S.players[S.cur].resources[r]++;
-    pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[v]+".",true);
+  S.robberHex=hi; S.mode=null;
+  // Opponents with a settlement or city touching the new hex are eligible to be robbed.
+  const victims=[...new Set(hexes[hi].corners.map(v=>S.buildings[v]).filter(b=>b&&b.player!==S.cur).map(b=>b.player))];
+  if(victims.length<=1){
+    finishRobber(victims[0]);           // undefined → nobody to steal from
   } else {
+    // More than one rival borders the hex — let the current player pick.
+    S.stealChoices=victims; renderAll(); openSteal();
+  }
+}
+function finishRobber(victim){
+  S.pendingRobber=false; S.mode=null; S.stealChoices=null;
+  if(victim==null){
     pushLog(PLAYER_NAMES[S.cur]+" moves the robber. No one to steal from here.",true);
+  } else {
+    const pool=[]; RES_ORDER.forEach(r=>{for(let k=0;k<S.players[victim].resources[r];k++)pool.push(r);});
+    if(pool.length===0){
+      pushLog(PLAYER_NAMES[S.cur]+" moves the robber, but "+PLAYER_NAMES[victim]+" has no cards to steal.",true);
+    } else {
+      const r=pool[Math.floor(Math.random()*pool.length)];
+      S.players[victim].resources[r]--; S.players[S.cur].resources[r]++;
+      pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[victim]+".",true);
+    }
   }
   renderAll();
 }
@@ -637,8 +658,19 @@ function rollDice(){
   S.dice=[d1,d2]; S.hasRolled=true;
   const sum=d1+d2;
   if(sum===7){
-    S.pendingRobber=true; S.mode="robber";
-    pushLog(PLAYER_NAMES[S.cur]+" rolled 7 — move the robber.",true);
+    // A 7: first everyone over the hand limit discards, THEN the robber moves.
+    S.pendingRobber=true; S.mode=null;
+    pushLog(PLAYER_NAMES[S.cur]+" rolled a 7.",true);
+    const order=[];
+    for(let k=0;k<S.nPlayers;k++){const pi=(S.cur+k)%S.nPlayers; if(totalCards(pi)>7) order.push(pi);}
+    if(order.length){
+      S.discardQueue=order; S.discardIdx=0;
+      renderAll();
+      openDiscard();
+      return;
+    }
+    S.mode="robber";
+    pushLog(PLAYER_NAMES[S.cur]+" — move the robber.",true);
   } else {
     const gains={}; // player -> {res:amount}
     hexes.forEach((h,hi)=>{
@@ -1110,6 +1142,78 @@ function tradeRespond(accept){
   pushLog(PLAYER_NAMES[p]+" and "+PLAYER_NAMES[q]+" trade — "+PLAYER_NAMES[p]+" gives "+resList(TRADE.give)+", gets "+resList(TRADE.receive)+".",true);
   closeTrade();
 }
+
+/* ================= ROBBER: DISCARD & STEAL DIALOGS ================= */
+let DISCARD=null;
+function openDiscard(){
+  const p=S.discardQueue[S.discardIdx];
+  DISCARD={player:p, need:Math.floor(totalCards(p)/2), sel:zeroRes()};
+  $("discardOverlay").classList.remove("hidden");
+  renderDiscard();
+}
+function renderDiscard(){ if(DISCARD) $("discardModal").innerHTML=discardHTML(); }
+function discardHTML(){
+  const p=DISCARD.player;
+  const selSum=RES_ORDER.reduce((s,r)=>s+DISCARD.sel[r],0);
+  const atTotal=selSum>=DISCARD.need;
+  const steppers=`<div class="steppers">`+RES_ORDER.map(r=>{
+    const val=DISCARD.sel[r], max=S.players[p].resources[r], dark=(r==="sheep"||r==="wheat");
+    return `<div class="stepper">
+      <div class="st-swatch" style="background:${TILE_COLORS[r]};${dark?"color:#2c2117":"color:#fff"}">${RES_SHORT[r]}</div>
+      <div class="st-ctl">
+        <button ${val<=0?"disabled":""} onclick="discardAdjust('${r}',-1)">−</button>
+        <span class="st-val">${val}</span>
+        <button ${(val>=max||atTotal)?"disabled":""} onclick="discardAdjust('${r}',1)">+</button>
+      </div><div class="st-max">/ ${max}</div></div>`;
+  }).join("")+`</div>`;
+  const ready=selSum===DISCARD.need;
+  return `
+    <div class="trade-head"><h2>Discard cards</h2><span class="trade-who">${PLAYER_NAMES[p]}</span></div>
+    <p class="trade-intro">A 7 was rolled. <strong>${PLAYER_NAMES[p]}</strong> holds ${totalCards(p)} cards and must discard
+      <strong>${DISCARD.need}</strong> back to the bank. Chosen ${selSum} / ${DISCARD.need}.</p>
+    <div class="trade-block"><div class="tb-lab">Choose cards to discard</div>${steppers}</div>
+    <div class="trade-foot">
+      <button class="btn primary" ${ready?"":"disabled"} onclick="confirmDiscard()">Discard ${DISCARD.need}</button>
+    </div>`;
+}
+function discardAdjust(r,delta){
+  const p=DISCARD.player, max=S.players[p].resources[r];
+  const selSum=RES_ORDER.reduce((s,x)=>s+DISCARD.sel[x],0);
+  if(delta>0 && selSum>=DISCARD.need) return;     // can't pick more than required
+  DISCARD.sel[r]=Math.max(0,Math.min(max,DISCARD.sel[r]+delta));
+  renderDiscard();
+}
+function confirmDiscard(){
+  const p=DISCARD.player;
+  const selSum=RES_ORDER.reduce((s,r)=>s+DISCARD.sel[r],0);
+  if(selSum!==DISCARD.need) return;
+  RES_ORDER.forEach(r=>{ S.players[p].resources[r]-=DISCARD.sel[r]; });
+  pushLog(PLAYER_NAMES[p]+" discards "+DISCARD.need+" card"+(DISCARD.need===1?"":"s")+".",true);
+  S.discardIdx++;
+  if(S.discardIdx<S.discardQueue.length){
+    openDiscard();
+  } else {
+    DISCARD=null; $("discardOverlay").classList.add("hidden");
+    S.mode="robber";
+    pushLog(PLAYER_NAMES[S.cur]+" — move the robber.",true);
+    renderAll();
+  }
+}
+
+function openSteal(){ $("stealOverlay").classList.remove("hidden"); renderSteal(); }
+function renderSteal(){ if(S.stealChoices) $("stealModal").innerHTML=stealHTML(); }
+function stealHTML(){
+  const opts=S.stealChoices.map(v=>
+    `<button class="partner" onclick="chooseSteal(${v})">
+      <span class="pswatch" style="background:${PLAYER_COLORS[v]}"></span>
+      <span>${PLAYER_NAMES[v]}</span>
+      <span class="pcards">${totalCards(v)} cards</span></button>`).join("");
+  return `
+    <div class="trade-head"><h2>Steal a card</h2><span class="trade-who">${PLAYER_NAMES[S.cur]}</span></div>
+    <p class="trade-intro">Several rivals border that hex. Choose whom to rob — one random card will be taken.</p>
+    <div class="trade-block"><div class="partners">${opts}</div></div>`;
+}
+function chooseSteal(v){ $("stealOverlay").classList.add("hidden"); finishRobber(v); }
 
 /* ---------------- Init ---------------- */
 $("newGameBtn").addEventListener("click",()=>{renderSetup();$("overlay").classList.remove("hidden");});
