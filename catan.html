@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catan — Island of the Pass-and-Play</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --sea:#11414c; --sea-deep:#0b2c34; --sea-glow:#1c5e6c;
+    --parchment:#f3e7cd; --parchment-2:#ece0c2; --parchment-edge:#d8c49a;
+    --wood:#6b4f2e; --wood-dark:#3a2a1a; --ink:#2c2117; --ink-soft:#5d4e3c;
+    --gold:#e0b84a; --gold-deep:#b8902c;
+    --t-wood:#2f6b3c; --t-brick:#bf6138; --t-sheep:#a8c459; --t-wheat:#e3b23c; --t-ore:#74808d; --t-desert:#d9c08c;
+    --red-num:#b23a2e; --robber:#2b2b2b;
+    --p0:#c0392b; --p1:#2f74b5; --p2:#df8a2c; --p3:#efe9dc;
+    --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    font-family:'Outfit',system-ui,-apple-system,sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(120% 100% at 30% 0%, var(--sea-glow) 0%, var(--sea) 42%, var(--sea-deep) 100%);
+    min-height:100%;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{
+    max-width:1180px; margin:0 auto; padding:18px 18px 40px;
+    display:flex; gap:20px; align-items:flex-start;
+  }
+  /* ---------- Board ---------- */
+  .board-card{
+    flex:1 1 auto; min-width:0;
+    background:linear-gradient(160deg,#0f3a44,#0c3038);
+    border:1px solid rgba(224,184,74,.25);
+    border-radius:14px; padding:10px;
+    box-shadow:var(--shadow);
+  }
+  svg#board{display:block; width:100%; height:auto;}
+  .hex-poly{stroke:rgba(20,30,20,.45); stroke-width:1.4; cursor:default;}
+  .tok-circle{fill:var(--parchment); stroke:#9c8554; stroke-width:1.4;}
+  .tok-text{font-family:'Cinzel',Georgia,serif; font-weight:700; text-anchor:middle; dominant-baseline:central; fill:var(--ink);}
+  .tok-text.red{fill:var(--red-num);}
+  .res-label{font-family:'Outfit',sans-serif; font-weight:600; font-size:9.5px; letter-spacing:1.5px;
+    text-anchor:middle; fill:rgba(28,22,14,.55); text-transform:uppercase; pointer-events:none;}
+  .road-line{stroke-linecap:round;}
+  .piece{stroke:var(--wood-dark); stroke-width:1.6; stroke-linejoin:round;}
+  .cand{cursor:pointer;}
+  .cand-dot{fill:rgba(224,184,74,.85); stroke:#fff; stroke-width:1.6;}
+  .cand-road{stroke:var(--gold); stroke-width:7; stroke-linecap:round; stroke-dasharray:2 6; opacity:.95;}
+  .cand-hex{fill:rgba(224,184,74,.18); stroke:var(--gold); stroke-width:3; stroke-dasharray:6 5;}
+  .cand-ring{fill:none; stroke:var(--gold); stroke-width:3.5;}
+  @media (prefers-reduced-motion: no-preference){
+    .pulse{animation:pulse 1.25s ease-in-out infinite;}
+    @keyframes pulse{0%,100%{opacity:.55;} 50%{opacity:1;}}
+  }
+  .compass text{font-family:'Cinzel',serif; fill:rgba(224,184,74,.7); font-size:11px; text-anchor:middle; dominant-baseline:central;}
+
+  /* ---------- Panel ---------- */
+  .panel{
+    flex:0 0 348px; width:348px;
+    background:linear-gradient(175deg,var(--parchment),var(--parchment-2));
+    border:1px solid var(--parchment-edge);
+    border-radius:14px; box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .panel-head{
+    padding:16px 18px 12px; border-bottom:1px solid rgba(107,79,46,.22);
+    display:flex; align-items:baseline; justify-content:space-between;
+    background:linear-gradient(180deg, rgba(107,79,46,.10), transparent);
+  }
+  .title{font-family:'Cinzel',Georgia,serif; font-weight:700; font-size:26px; letter-spacing:5px; margin:0; color:var(--wood-dark);}
+  .title .small{display:block; font-family:'Outfit',sans-serif; font-weight:500; font-size:9.5px; letter-spacing:3px; color:var(--ink-soft); text-transform:uppercase; margin-top:2px;}
+  .btn-ghost{
+    font-family:'Outfit',sans-serif; font-size:11px; letter-spacing:.5px; cursor:pointer;
+    background:transparent; color:var(--ink-soft); border:1px solid rgba(107,79,46,.35);
+    border-radius:8px; padding:6px 10px;
+  }
+  .btn-ghost:hover{background:rgba(107,79,46,.10);}
+  .section{padding:14px 18px;}
+  .section + .section{border-top:1px solid rgba(107,79,46,.16);}
+
+  /* Dice */
+  .dice-row{display:flex; align-items:center; gap:14px;}
+  .dice{display:flex; gap:10px;}
+  .die{width:42px; height:42px; background:#fbf4e4; border:1px solid #c9b489; border-radius:9px;
+    display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr);
+    padding:6px; box-shadow:inset 0 -3px 6px rgba(0,0,0,.06);}
+  .pip{width:7px; height:7px; border-radius:50%; align-self:center; justify-self:center; background:transparent;}
+  .pip.on{background:var(--ink);}
+  .sum{font-family:'Cinzel',serif; font-weight:700; font-size:30px; color:var(--wood-dark); min-width:34px; text-align:center;}
+  .sum small{display:block; font-family:'Outfit',sans-serif; font-weight:500; font-size:9px; letter-spacing:1.5px; color:var(--ink-soft); text-transform:uppercase;}
+
+  /* Players */
+  .players{display:flex; flex-direction:column; gap:9px;}
+  .pcard{display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px;
+    border:1px solid rgba(107,79,46,.18); background:rgba(255,255,255,.30);}
+  .pcard.active{border-color:var(--gold-deep); background:rgba(224,184,74,.18); box-shadow:0 0 0 1px var(--gold-deep) inset;}
+  .swatch{width:18px; height:18px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
+  .pname{font-weight:600; font-size:13px; flex:0 0 auto; min-width:48px;}
+  .vp{margin-left:auto; font-family:'Cinzel',serif; font-weight:700; font-size:13px; color:var(--wood-dark);
+    background:rgba(107,79,46,.12); border-radius:20px; padding:2px 9px;}
+  .vp small{font-family:'Outfit',sans-serif; font-weight:500; font-size:9px;}
+  .res-chips{display:flex; gap:5px; flex-wrap:wrap; margin-top:7px;}
+  .chip{display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; color:#fff;
+    border-radius:6px; padding:2px 6px; line-height:1.4;}
+  .chip .c-lab{font-weight:500; font-size:8.5px; letter-spacing:.5px; opacity:.85; text-transform:uppercase;}
+  .pcard-body{flex:1 1 100%;}
+  .prow{display:flex; align-items:center; gap:10px;}
+
+  /* Actions */
+  .prompt{font-size:13px; line-height:1.5; color:var(--ink); background:rgba(107,79,46,.10);
+    border-left:3px solid var(--gold-deep); border-radius:6px; padding:9px 11px; min-height:38px;}
+  .actions{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;}
+  .btn{font-family:'Outfit',sans-serif; font-weight:600; font-size:12.5px; cursor:pointer;
+    border:1px solid var(--wood-dark); border-radius:9px; padding:9px 8px; color:var(--parchment);
+    background:linear-gradient(180deg,#7a5a34,#5e4527); transition:transform .05s, filter .15s;}
+  .btn:hover:not(:disabled){filter:brightness(1.08);}
+  .btn:active:not(:disabled){transform:translateY(1px);}
+  .btn:disabled{opacity:.4; cursor:not-allowed;}
+  .btn.primary{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); border-color:var(--gold-deep);}
+  .btn.span2{grid-column:span 2;}
+  .btn .cost{display:block; font-weight:400; font-size:9px; letter-spacing:.3px; opacity:.85; margin-top:1px;}
+  .btn.cancel{background:transparent; color:#9c3b30; border-color:#9c3b30;}
+
+  /* Log */
+  .log{font-size:11.5px; line-height:1.6; color:var(--ink-soft); max-height:108px; overflow-y:auto;}
+  .log div{padding:1px 0;}
+  .log .now{color:var(--ink); font-weight:600;}
+
+  /* Overlay */
+  .overlay{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:20px;
+    background:radial-gradient(120% 100% at 50% 0%, rgba(28,94,108,.6), rgba(11,44,52,.82)); z-index:50;}
+  .overlay.hidden{display:none;}
+  .modal{background:linear-gradient(175deg,var(--parchment),var(--parchment-2)); border:1px solid var(--parchment-edge);
+    border-radius:16px; box-shadow:var(--shadow); padding:30px 34px; max-width:430px; text-align:center;}
+  .modal h1{font-family:'Cinzel',serif; font-weight:700; letter-spacing:6px; font-size:38px; margin:0 0 4px; color:var(--wood-dark);}
+  .modal .sub{font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--ink-soft); margin-bottom:18px;}
+  .modal p{font-size:13px; line-height:1.6; color:var(--ink); margin:0 auto 20px; max-width:330px;}
+  .choose{display:flex; gap:10px; justify-content:center; margin-bottom:8px;}
+  .choose .btn{padding:13px 18px; font-size:14px;}
+  .winner-swatch{display:inline-block; width:14px; height:14px; border-radius:4px; border:1.5px solid var(--wood-dark); vertical-align:middle; margin-right:6px;}
+
+  @media (max-width:880px){
+    .wrap{flex-direction:column;}
+    .panel{flex:1 1 auto; width:100%;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="board-card">
+    <svg id="board" viewBox="0 0 600 590" role="img" aria-label="Catan board"></svg>
+  </div>
+
+  <aside class="panel">
+    <div class="panel-head">
+      <h1 class="title">CATAN<span class="small">Pass &amp; Play Island</span></h1>
+      <button class="btn-ghost" id="newGameBtn">New game</button>
+    </div>
+
+    <div class="section">
+      <div class="dice-row">
+        <div class="dice" id="dice"></div>
+        <div class="sum" id="sum">–<small>Roll</small></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="players" id="players"></div>
+    </div>
+
+    <div class="section">
+      <div class="prompt" id="prompt">Welcome to the island.</div>
+      <div class="actions" id="actions"></div>
+    </div>
+
+    <div class="section">
+      <div class="log" id="log"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- Start / End overlay -->
+<div class="overlay" id="overlay">
+  <div class="modal" id="modal">
+    <h1>CATAN</h1>
+    <div class="sub">Settlers of the Island</div>
+    <p>Collect wood, brick, sheep, wheat and ore. Build settlements and roads, upgrade to cities, and race to <strong>10 victory points</strong>. Played hot-seat — pass the screen between turns.</p>
+    <div class="choose">
+      <button class="btn primary" onclick="startGame(2)">2 Players</button>
+      <button class="btn primary" onclick="startGame(3)">3 Players</button>
+      <button class="btn primary" onclick="startGame(4)">4 Players</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const SVGNS="http://www.w3.org/2000/svg";
+const el=(tag,attrs={},parent)=>{const e=document.createElementNS(SVGNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;};
+
+/* ---------------- Static data ---------------- */
+const TILE_COLORS={wood:"#2f6b3c",brick:"#bf6138",sheep:"#a8c459",wheat:"#e3b23c",ore:"#74808d",desert:"#d9c08c"};
+const RES_LABEL={wood:"Forest",brick:"Hills",sheep:"Pasture",wheat:"Fields",ore:"Mountain"};
+const RES_ORDER=["wood","brick","sheep","wheat","ore"];
+const RES_SHORT={wood:"Wood",brick:"Brick",sheep:"Sheep",wheat:"Wheat",ore:"Ore"};
+const PLAYER_COLORS=["#c0392b","#2f74b5","#df8a2c","#efe9dc"];
+const PLAYER_NAMES=["Red","Blue","Orange","White"];
+const COST={
+  road:{wood:1,brick:1},
+  settlement:{wood:1,brick:1,sheep:1,wheat:1},
+  city:{ore:3,wheat:2}
+};
+const LIMIT={settlement:5,city:4,road:15};
+
+/* ---------------- Board geometry ---------------- */
+const R=48, W=Math.sqrt(3)*R, VD=1.5*R, CX0=300, CY0=295;
+const COUNTS=[3,4,5,4,3];
+let hexes=[], vertices=[], edges=[];
+
+function buildGeometry(){
+  hexes=[]; vertices=[]; edges=[];
+  const vmap=new Map(), emap=new Map();
+  const vkey=(x,y)=>Math.round(x)+","+Math.round(y);
+  const ekey=(a,b)=>a<b?a+"-"+b:b+"-"+a;
+  const getV=(x,y)=>{const k=vkey(x,y);if(vmap.has(k))return vmap.get(k);
+    const v={id:vertices.length,x,y,hexes:[],edges:[],adj:[]};vertices.push(v);vmap.set(k,v);return v;};
+  const getE=(a,b,hi)=>{const k=ekey(a,b);
+    if(emap.has(k)){const e=emap.get(k);if(!e.hexes.includes(hi))e.hexes.push(hi);return e;}
+    const e={id:edges.length,v1:Math.min(a,b),v2:Math.max(a,b),hexes:[hi]};edges.push(e);emap.set(k,e);return e;};
+  COUNTS.forEach((count,row)=>{
+    const y=CY0+(row-2)*VD, xStart=CX0-(count-1)/2*W;
+    for(let i=0;i<count;i++) hexes.push({cx:xStart+i*W,cy:y,corners:[],edgeIds:[]});
+  });
+  hexes.forEach((h,hi)=>{
+    for(let k=0;k<6;k++){
+      const ang=(-90+60*k)*Math.PI/180;
+      const v=getV(h.cx+R*Math.cos(ang),h.cy+R*Math.sin(ang));
+      h.corners.push(v.id); v.hexes.push(hi);
+    }
+    for(let k=0;k<6;k++){
+      const a=h.corners[k], b=h.corners[(k+1)%6];
+      const e=getE(a,b,hi); h.edgeIds.push(e.id);
+    }
+  });
+  edges.forEach(e=>{
+    vertices[e.v1].edges.push(e.id); vertices[e.v2].edges.push(e.id);
+    vertices[e.v1].adj.push(e.v2); vertices[e.v2].adj.push(e.v1);
+  });
+}
+
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+function assignTiles(){
+  const bag=shuffle([...Array(4).fill("wood"),...Array(3).fill("brick"),...Array(4).fill("sheep"),
+    ...Array(4).fill("wheat"),...Array(3).fill("ore"),"desert"]);
+  const nums=shuffle([2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]);
+  let ni=0, desert=-1;
+  hexes.forEach((h,i)=>{
+    h.resource=bag[i];
+    if(h.resource==="desert"){h.number=null; desert=i;}
+    else h.number=nums[ni++];
+  });
+  return desert;
+}
+
+/* ---------------- Game state ---------------- */
+let S=null;
+const $=id=>document.getElementById(id);
+
+function startGame(n){
+  buildGeometry();
+  const robberHex=assignTiles();
+  S={
+    nPlayers:n,
+    players:Array.from({length:n},(_,i)=>({i,resources:{wood:0,brick:0,sheep:0,wheat:0,ore:0},vp:0})),
+    buildings:{},          // vertexId -> {player,type}
+    roads:{},              // edgeId -> player
+    robberHex,
+    phase:"setup",
+    cur:0,
+    hasRolled:false,
+    mode:null,             // null|settlement|road|city|robber|setupSettlement|setupRoad
+    pendingRobber:false,
+    lastSetupV:null,
+    dice:[null,null],
+    log:[]
+  };
+  // snake setup order
+  const fwd=[...Array(n).keys()];
+  S.setupQueue=[...fwd,...[...fwd].reverse()];
+  S.setupIdx=0;
+  S.settlementsPlaced=Array(n).fill(0);
+
+  $("overlay").classList.add("hidden");
+  drawStaticBoard();
+  beginSetupTurn();
+}
+
+function pushLog(msg,now){ S.log.push({msg,now}); if(S.log.length>40)S.log.shift(); }
+
+/* ---------------- Counting / rules helpers ---------------- */
+function ownCount(p,type){
+  if(type==="road") return Object.values(S.roads).filter(x=>x===p).length;
+  return Object.values(S.buildings).filter(b=>b.player===p&&b.type===type).length;
+}
+function recomputeVP(){
+  S.players.forEach(pl=>pl.vp=0);
+  for(const vid in S.buildings){const b=S.buildings[vid];S.players[b.player].vp+=(b.type==="city"?2:1);}
+}
+function totalCards(p){return RES_ORDER.reduce((s,r)=>s+S.players[p].resources[r],0);}
+function canAfford(p,cost){return Object.keys(cost).every(r=>S.players[p].resources[r]>=cost[r]);}
+function pay(p,cost){Object.keys(cost).forEach(r=>S.players[p].resources[r]-=cost[r]);}
+function costText(cost){return Object.keys(cost).map(r=>cost[r]+" "+RES_SHORT[r].toLowerCase()).join(", ");}
+
+function hasOwnRoadAt(vid,p){return vertices[vid].edges.some(eid=>S.roads[eid]===p);}
+function roadConnected(eid,p){
+  const e=edges[eid];
+  for(const v of [e.v1,e.v2]){
+    const b=S.buildings[v];
+    if(b&&b.player===p) return true;
+    if(vertices[v].edges.some(o=>o!==eid&&S.roads[o]===p)) return true;
+  }
+  return false;
+}
+function legalSettlements(p,setup){
+  return vertices.filter(v=>!S.buildings[v.id]
+      && v.adj.every(n=>!S.buildings[n])
+      && (setup || hasOwnRoadAt(v.id,p))).map(v=>v.id);
+}
+function legalRoads(p,setup,anchorV){
+  return edges.filter(e=> S.roads[e.id]===undefined
+      && (setup ? (e.v1===anchorV||e.v2===anchorV) : roadConnected(e.id,p))).map(e=>e.id);
+}
+function legalCities(p){
+  return Object.keys(S.buildings).filter(v=>S.buildings[v].player===p&&S.buildings[v].type==="settlement").map(Number);
+}
+
+/* ---------------- Setup phase ---------------- */
+function beginSetupTurn(){
+  S.cur=S.setupQueue[S.setupIdx];
+  S.mode="setupSettlement"; S.lastSetupV=null;
+  renderAll();
+}
+function commitSettlement(vid){
+  if(S.phase==="setup"){
+    S.buildings[vid]={player:S.cur,type:"settlement"};
+    S.settlementsPlaced[S.cur]++;
+    if(S.settlementsPlaced[S.cur]===2){ // second settlement yields starting resources
+      const got=[];
+      vertices[vid].hexes.forEach(hi=>{const h=hexes[hi];if(h.resource!=="desert"){S.players[S.cur].resources[h.resource]++;got.push(RES_SHORT[h.resource]);}});
+      if(got.length) pushLog(PLAYER_NAMES[S.cur]+" collects "+got.join(", ")+" from the second settlement.");
+    }
+    S.lastSetupV=vid; S.mode="setupRoad";
+    recomputeVP(); renderAll();
+    return;
+  }
+  // normal play
+  pay(S.cur,COST.settlement);
+  S.buildings[vid]={player:S.cur,type:"settlement"};
+  pushLog(PLAYER_NAMES[S.cur]+" builds a settlement.",true);
+  S.mode=null; recomputeVP(); checkWin(); renderAll();
+}
+function commitRoad(eid){
+  if(S.phase==="setup"){
+    S.roads[eid]=S.cur;
+    S.setupIdx++;
+    if(S.setupIdx<S.setupQueue.length){ beginSetupTurn(); }
+    else { // setup complete
+      S.phase="play"; S.cur=0; S.hasRolled=false; S.mode=null;
+      pushLog("Setup complete — let the trading begin!",true);
+      renderAll();
+    }
+    return;
+  }
+  pay(S.cur,COST.road);
+  S.roads[eid]=S.cur;
+  pushLog(PLAYER_NAMES[S.cur]+" builds a road.",true);
+  S.mode=null; renderAll();
+}
+function commitCity(vid){
+  pay(S.cur,COST.city);
+  S.buildings[vid].type="city";
+  pushLog(PLAYER_NAMES[S.cur]+" upgrades to a city.",true);
+  S.mode=null; recomputeVP(); checkWin(); renderAll();
+}
+function commitRobber(hi){
+  S.robberHex=hi; S.pendingRobber=false; S.mode=null;
+  // steal from a random adjacent opponent who has cards
+  const victims=[...new Set(hexes[hi].corners.map(v=>S.buildings[v]).filter(b=>b&&b.player!==S.cur).map(b=>b.player))]
+    .filter(p=>totalCards(p)>0);
+  if(victims.length){
+    const v=victims[Math.floor(Math.random()*victims.length)];
+    const pool=[]; RES_ORDER.forEach(r=>{for(let k=0;k<S.players[v].resources[r];k++)pool.push(r);});
+    const r=pool[Math.floor(Math.random()*pool.length)];
+    S.players[v].resources[r]--; S.players[S.cur].resources[r]++;
+    pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[v]+".",true);
+  } else {
+    pushLog(PLAYER_NAMES[S.cur]+" moves the robber. No one to steal from here.",true);
+  }
+  renderAll();
+}
+
+/* ---------------- Turn actions ---------------- */
+function rollDice(){
+  if(S.phase!=="play"||S.hasRolled) return;
+  const d1=1+Math.floor(Math.random()*6), d2=1+Math.floor(Math.random()*6);
+  S.dice=[d1,d2]; S.hasRolled=true;
+  const sum=d1+d2;
+  if(sum===7){
+    S.pendingRobber=true; S.mode="robber";
+    pushLog(PLAYER_NAMES[S.cur]+" rolled 7 — move the robber.",true);
+  } else {
+    const gains={}; // player -> {res:amount}
+    hexes.forEach((h,hi)=>{
+      if(h.number!==sum||hi===S.robberHex||h.resource==="desert") return;
+      h.corners.forEach(v=>{const b=S.buildings[v];
+        if(b){const amt=b.type==="city"?2:1; S.players[b.player].resources[h.resource]+=amt;
+          gains[b.player]=gains[b.player]||{}; gains[b.player][h.resource]=(gains[b.player][h.resource]||0)+amt;}});
+    });
+    const parts=Object.keys(gains).map(p=>PLAYER_NAMES[p]+" +"+Object.keys(gains[p]).map(r=>gains[p][r]+RES_SHORT[r][0]).join(""));
+    pushLog("Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production."),true);
+  }
+  renderAll();
+}
+function endTurn(){
+  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber) return;
+  S.cur=(S.cur+1)%S.nPlayers; S.hasRolled=false; S.mode=null; S.dice=[null,null];
+  renderAll();
+}
+function checkWin(){
+  if(S.players[S.cur].vp>=10){ S.phase="over"; S.winner=S.cur; }
+}
+
+/* ---------------- Mode entry from buttons ---------------- */
+function tryMode(type){
+  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber){return;}
+  if(S.mode===type){ S.mode=null; renderAll(); return; } // toggle off
+  const p=S.cur;
+  if(!canAfford(p,COST[type])){ flash("Not enough resources — a "+type+" costs "+costText(COST[type])+"."); return; }
+  let legal;
+  if(type==="settlement"){ if(ownCount(p,"settlement")>=LIMIT.settlement){flash("You've placed all 5 settlements.");return;} legal=legalSettlements(p,false); }
+  else if(type==="road"){ if(ownCount(p,"road")>=LIMIT.road){flash("You've placed all 15 roads.");return;} legal=legalRoads(p,false,null); }
+  else if(type==="city"){ if(ownCount(p,"city")>=LIMIT.city){flash("You've built all 4 cities.");return;} legal=legalCities(p); }
+  if(legal.length===0){ flash(type==="city"?"No settlement of yours to upgrade.":"No legal spot for a "+type+" right now."); return; }
+  S.mode=type; renderAll();
+}
+function flash(msg){ const pr=$("prompt"); pr.textContent=msg; pr.style.borderColor="#9c3b30"; setTimeout(()=>{pr.style.borderColor="";renderPrompt();},1900); }
+function cancelMode(){ S.mode=null; renderAll(); }
+
+/* ================= RENDERING ================= */
+const layers={};
+function drawStaticBoard(){
+  const svg=$("board"); svg.innerHTML="";
+  // defs
+  const defs=el("defs",{},svg);
+  const sea=el("radialGradient",{id:"seaGrad",cx:"42%",cy:"30%",r:"80%"},defs);
+  el("stop",{offset:"0%","stop-color":"#1c5e6c"},sea);
+  el("stop",{offset:"55%","stop-color":"#12434e"},sea);
+  el("stop",{offset:"100%","stop-color":"#0b2c34"},sea);
+
+  el("rect",{x:0,y:0,width:600,height:590,rx:10,fill:"url(#seaGrad)"},svg);
+  // map border (decorative, on top last) — placeholder group order
+  // compass rose (in water, bottom-left)
+  drawCompass(el("g",{class:"compass"},svg),74,508,30);
+
+  // coastline frame: boundary edges as thick strokes (sand under, wood over)
+  const frame=el("g",{},svg);
+  const boundary=edges.filter(e=>e.hexes.length===1);
+  boundary.forEach(e=>{const a=vertices[e.v1],b=vertices[e.v2];
+    el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:"#cdb487",["stroke-width"]:22,["stroke-linecap"]:"round",opacity:.45},frame);});
+  boundary.forEach(e=>{const a=vertices[e.v1],b=vertices[e.v2];
+    el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:"#6b4f2e",["stroke-width"]:13,["stroke-linecap"]:"round"},frame);});
+
+  // tiles
+  const gTiles=el("g",{},svg);
+  hexes.forEach((h,hi)=>{
+    const pts=h.corners.map(c=>vertices[c].x+","+vertices[c].y).join(" ");
+    const poly=el("polygon",{points:pts,fill:TILE_COLORS[h.resource],class:"hex-poly"},gTiles);
+    poly.dataset.hi=hi;
+    // resource label (top of hex)
+    el("text",{x:h.cx,y:h.cy-R*0.52+4,class:"res-label"},gTiles).textContent=(h.resource==="desert"?"Desert":RES_LABEL[h.resource]);
+  });
+
+  // dynamic layers (created empty, filled by render)
+  layers.tokens=el("g",{},svg);
+  layers.robber=el("g",{},svg);
+  layers.roads=el("g",{},svg);
+  layers.buildings=el("g",{},svg);
+  layers.interact=el("g",{},svg);
+
+  // top map border
+  el("rect",{x:6,y:6,width:588,height:578,rx:8,fill:"none",stroke:"rgba(224,184,74,.5)",["stroke-width"]:1.5,["pointer-events"]:"none"},svg);
+  el("rect",{x:11,y:11,width:578,height:568,rx:6,fill:"none",stroke:"rgba(224,184,74,.25)",["stroke-width"]:1,["pointer-events"]:"none"},svg);
+
+  drawTokens();
+}
+function drawCompass(g,cx,cy,r){
+  // 8-point star
+  const pts=[];
+  for(let k=0;k<8;k++){const ang=(k*45-90)*Math.PI/180;const rr=(k%2===0)?r:r*0.4;pts.push((cx+rr*Math.cos(ang))+","+(cy+rr*Math.sin(ang)));}
+  el("polygon",{points:pts.join(" "),fill:"rgba(224,184,74,.12)",stroke:"rgba(224,184,74,.45)",["stroke-width"]:1},g);
+  el("circle",{cx,cy,r:r*0.16,fill:"rgba(224,184,74,.5)"},g);
+  el("text",{x:cx,y:cy-r-7},g).textContent="N";
+  el("text",{x:cx,y:cy+r+7},g).textContent="S";
+  el("text",{x:cx+r+8,y:cy},g).textContent="E";
+  el("text",{x:cx-r-8,y:cy},g).textContent="W";
+}
+function drawTokens(){
+  layers.tokens.innerHTML="";
+  hexes.forEach((h,hi)=>{
+    if(h.number===null) return;
+    el("circle",{cx:h.cx,cy:h.cy+6,r:15,class:"tok-circle"},layers.tokens);
+    const t=el("text",{x:h.cx,y:h.cy+6,class:"tok-text"+((h.number===6||h.number===8)?" red":""),["font-size"]:(h.number>=10?13:15)},layers.tokens);
+    t.textContent=h.number;
+  });
+}
+function pieceSettlement(x,y,color){
+  const g=el("g",{transform:`translate(${x},${y})`});
+  el("path",{d:"M0,-9 L8,-2 L8,8 L-8,8 L-8,-2 Z",fill:color,class:"piece"},g);
+  return g;
+}
+function pieceCity(x,y,color){
+  const g=el("g",{transform:`translate(${x},${y})`});
+  el("path",{d:"M-11,9 L-11,-1 L-3,-1 L-3,-6 L4,-11 L11,-6 L11,9 Z",fill:color,class:"piece"},g);
+  el("rect",{x:-8,y:1,width:5,height:5,fill:"rgba(0,0,0,.20)"},g);
+  return g;
+}
+function renderPieces(){
+  layers.robber.innerHTML=""; layers.roads.innerHTML=""; layers.buildings.innerHTML="";
+  // robber
+  const rh=hexes[S.robberHex];
+  const rg=el("g",{transform:`translate(${rh.cx},${rh.cy+24})`},layers.robber);
+  el("ellipse",{cx:0,cy:9,rx:9,ry:4,fill:"rgba(0,0,0,.30)"},rg);
+  el("path",{d:"M-7,9 C-7,2 -5,-1 -4,-4 C-7,-6 -6,-12 0,-12 C6,-12 7,-6 4,-4 C5,-1 7,2 7,9 Z",fill:"var(--robber)",stroke:"#000","stroke-width":1},rg);
+  // roads
+  for(const eid in S.roads){
+    const e=edges[eid], a=vertices[e.v1], b=vertices[e.v2];
+    const ix=a.x+(b.x-a.x)*0.18, iy=a.y+(b.y-a.y)*0.18, jx=b.x-(b.x-a.x)*0.18, jy=b.y-(b.y-a.y)*0.18;
+    el("line",{x1:ix,y1:iy,x2:jx,y2:jy,stroke:"var(--wood-dark)",["stroke-width"]:9,class:"road-line"},layers.roads);
+    el("line",{x1:ix,y1:iy,x2:jx,y2:jy,stroke:PLAYER_COLORS[S.roads[eid]],["stroke-width"]:6,class:"road-line"},layers.roads);
+  }
+  // buildings
+  for(const vid in S.buildings){
+    const b=S.buildings[vid], v=vertices[vid];
+    const g=b.type==="city"?pieceCity(v.x,v.y,PLAYER_COLORS[b.player]):pieceSettlement(v.x,v.y,PLAYER_COLORS[b.player]);
+    layers.buildings.appendChild(g);
+  }
+}
+function renderInteract(){
+  layers.interact.innerHTML="";
+  const p=S.cur, m=S.mode;
+  if(m==="setupSettlement"||m==="settlement"){
+    legalSettlements(p,m==="setupSettlement").forEach(vid=>{
+      const v=vertices[vid];
+      const c=el("circle",{cx:v.x,cy:v.y,r:11,class:"cand-dot pulse"},layers.interact);
+      const hit=el("circle",{cx:v.x,cy:v.y,r:14,fill:"transparent",class:"cand"},layers.interact);
+      hit.addEventListener("click",()=>commitSettlement(vid));
+    });
+  } else if(m==="setupRoad"||m==="road"){
+    legalRoads(p,m==="setupRoad",S.lastSetupV).forEach(eid=>{
+      const e=edges[eid],a=vertices[e.v1],b=vertices[e.v2];
+      el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,class:"cand-road pulse"},layers.interact);
+      const hit=el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:"transparent",["stroke-width"]:16,class:"cand"},layers.interact);
+      hit.addEventListener("click",()=>commitRoad(eid));
+    });
+  } else if(m==="city"){
+    legalCities(p).forEach(vid=>{
+      const v=vertices[vid];
+      el("circle",{cx:v.x,cy:v.y,r:14,class:"cand-ring pulse"},layers.interact);
+      const hit=el("circle",{cx:v.x,cy:v.y,r:15,fill:"transparent",class:"cand"},layers.interact);
+      hit.addEventListener("click",()=>commitCity(vid));
+    });
+  } else if(m==="robber"){
+    hexes.forEach((h,hi)=>{ if(hi===S.robberHex)return;
+      const pts=h.corners.map(c=>vertices[c].x+","+vertices[c].y).join(" ");
+      const poly=el("polygon",{points:pts,class:"cand-hex pulse cand"},layers.interact);
+      poly.addEventListener("click",()=>commitRobber(hi));
+    });
+  }
+}
+
+/* ---------- Panel ---------- */
+function diceHTML(n){
+  const map={1:[4],2:[0,8],3:[0,4,8],4:[0,2,6,8],5:[0,2,4,6,8],6:[0,2,3,5,6,8]};
+  let s="";for(let i=0;i<9;i++)s+=`<span class="pip ${n&&map[n].includes(i)?"on":""}"></span>`;return `<div class="die">${s}</div>`;
+}
+function renderDice(){
+  $("dice").innerHTML=diceHTML(S.dice[0])+diceHTML(S.dice[1]);
+  const sum=(S.dice[0]&&S.dice[1])?S.dice[0]+S.dice[1]:null;
+  $("sum").innerHTML=(sum?sum:"–")+"<small>"+(sum?"Rolled":"Roll")+"</small>";
+}
+function renderPlayers(){
+  const box=$("players"); box.innerHTML="";
+  S.players.forEach(pl=>{
+    const active=(pl.i===S.cur);
+    const card=document.createElement("div"); card.className="pcard"+(active?" active":"");
+    let chips="";
+    RES_ORDER.forEach(r=>{chips+=`<span class="chip" style="background:${TILE_COLORS[r]};${r==='sheep'||r==='wheat'?'color:#3a2e10;':''}"><span class="c-lab">${RES_SHORT[r]}</span>${pl.resources[r]}</span>`;});
+    card.innerHTML=`
+      <div class="prow" style="width:100%">
+        <span class="swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>
+        <span class="pname">${PLAYER_NAMES[pl.i]}</span>
+        <span class="vp">${pl.vp}<small> VP</small></span>
+      </div>
+      <div class="pcard-body"><div class="res-chips">${chips}</div></div>`;
+    box.appendChild(card);
+  });
+}
+function renderPrompt(){
+  const pr=$("prompt"); let t="";
+  if(S.phase==="setup"){
+    const who=PLAYER_NAMES[S.cur];
+    const round=S.setupIdx<S.nPlayers?"first":"second";
+    if(S.mode==="setupSettlement") t=`<strong>${who}</strong>, place your ${round} settlement. Tap a glowing spot on the island.`;
+    else t=`<strong>${who}</strong>, place a road touching that settlement.`;
+  } else if(S.phase==="over"){
+    t=`<strong>${PLAYER_NAMES[S.winner]}</strong> wins with 10 victory points! 🏆`;
+  } else {
+    const who=PLAYER_NAMES[S.cur];
+    if(S.pendingRobber) t=`<strong>${who}</strong> rolled a 7 — tap a hex to move the robber.`;
+    else if(S.mode==="settlement") t="Tap a glowing intersection to build your settlement.";
+    else if(S.mode==="road") t="Tap a glowing slot to build your road.";
+    else if(S.mode==="city") t="Tap one of your settlements to upgrade it to a city.";
+    else if(!S.hasRolled) t=`<strong>${who}'s</strong> turn — roll the dice to begin.`;
+    else t=`<strong>${who}</strong>, build what you can, then end your turn.`;
+  }
+  pr.innerHTML=t;
+}
+function renderActions(){
+  const box=$("actions"); box.innerHTML="";
+  const mk=(label,cls,handler,disabled,sub)=>{
+    const b=document.createElement("button");
+    b.className="btn "+cls; b.disabled=!!disabled;
+    b.innerHTML=label+(sub?`<span class="cost">${sub}</span>`:"");
+    if(!disabled) b.addEventListener("click",handler); box.appendChild(b); return b;
+  };
+  if(S.phase==="setup"){
+    const tip=document.createElement("div"); tip.className="btn span2"; tip.style.cssText="background:transparent;border:0;color:var(--ink-soft);font-weight:500;cursor:default;font-size:11.5px;";
+    tip.textContent="Setup round — placing starting settlements & roads.";
+    box.appendChild(tip); return;
+  }
+  if(S.phase==="over"){ mk("Play again","primary span2",()=>$("overlay").classList.remove("hidden")); return; }
+
+  const canAct=S.hasRolled&&!S.pendingRobber;
+  mk("Roll dice","primary span2",rollDice,S.hasRolled||S.pendingRobber);
+  mk("Build road","",()=>tryMode("road"),!canAct,"1 wood · 1 brick");
+  mk("Build settlement","",()=>tryMode("settlement"),!canAct,"wood·brick·sheep·wheat");
+  mk("Build city","",()=>tryMode("city"),!canAct,"3 ore · 2 wheat");
+  mk("End turn","",endTurn,!canAct);
+  if(S.mode&&S.mode!=="robber") mk("Cancel placement","cancel span2",cancelMode);
+}
+function renderLog(){
+  const box=$("log"); box.innerHTML="";
+  S.log.slice(-7).reverse().forEach((l,idx)=>{const d=document.createElement("div");
+    if(idx===0&&l.now)d.className="now"; d.textContent=l.msg; box.appendChild(d);});
+}
+function renderAll(){
+  renderPieces(); renderInteract();
+  renderDice(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
+}
+
+/* ---------------- Init ---------------- */
+$("newGameBtn").addEventListener("click",()=>$("overlay").classList.remove("hidden"));
+buildGeometry();
+// draw an idle board behind the start overlay
+assignTiles();
+drawStaticBoard();
+</script>
+</body>
+</html>
