@@ -173,6 +173,60 @@
   .sw:disabled{cursor:not-allowed; opacity:.28;}
   #startBtn:disabled{opacity:.4; cursor:not-allowed;}
 
+  /* ---------- Trade dialog ---------- */
+  .harbour-line{font-size:10px; color:var(--ink-soft); margin-top:5px; letter-spacing:.3px;}
+  .trade-modal{width:430px; max-width:92vw; text-align:left; padding:22px 24px;}
+  .trade-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:6px;}
+  .trade-head h2{font-family:'Cinzel',serif; font-weight:700; letter-spacing:2px; font-size:22px; margin:0; color:var(--wood-dark);}
+  .trade-who{font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft); white-space:nowrap;}
+  .trade-intro{font-size:12.5px; line-height:1.5; color:var(--ink); margin:0 0 14px; max-width:none;}
+  .trade-menu{display:flex; flex-direction:column; gap:9px; margin-bottom:14px;}
+  .trade-opt{display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left;
+    font-family:'Outfit',sans-serif; cursor:pointer; padding:11px 14px; border-radius:10px;
+    border:1px solid rgba(107,79,46,.35); background:rgba(255,255,255,.4); color:var(--ink);}
+  .trade-opt:hover:not(:disabled){background:rgba(224,184,74,.18); border-color:var(--gold-deep);}
+  .trade-opt:disabled{opacity:.45; cursor:not-allowed;}
+  .to-title{font-weight:700; font-size:14px; color:var(--wood-dark); letter-spacing:.5px;}
+  .to-sub{font-size:11px; color:var(--ink-soft);}
+  .trade-block{margin-bottom:12px;}
+  .tb-lab{font-size:10.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft); font-weight:600; margin-bottom:6px;}
+  .res-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:6px;}
+  .res-cell{display:flex; flex-direction:column; align-items:center; gap:2px; cursor:pointer;
+    border:2px solid transparent; border-radius:8px; padding:7px 2px 5px; background:var(--rc);
+    font-family:'Outfit',sans-serif;}
+  .res-cell:disabled{opacity:.32; cursor:not-allowed;}
+  .res-cell.sel{border-color:var(--wood-dark); box-shadow:0 0 0 2px var(--gold);}
+  .rc-name{font-weight:700; font-size:11px;}
+  .rc-sub{font-size:8px; opacity:.92; line-height:1.15; text-align:center;}
+  .trade-summary{font-size:12.5px; color:var(--ink); background:rgba(107,79,46,.10);
+    border-left:3px solid var(--gold-deep); border-radius:6px; padding:8px 11px; margin-bottom:14px;}
+  .trade-ports{font-size:11px; color:var(--ink-soft); margin-bottom:12px;}
+  .trade-foot{display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;}
+  .trade-foot .btn{padding:9px 14px;}
+  .partners{display:flex; flex-wrap:wrap; gap:7px;}
+  .partner{display:flex; align-items:center; gap:6px; cursor:pointer; font-family:'Outfit',sans-serif;
+    font-size:12px; font-weight:600; color:var(--ink); padding:6px 10px; border-radius:8px;
+    border:1px solid rgba(107,79,46,.35); background:rgba(255,255,255,.4);}
+  .partner:hover{background:rgba(224,184,74,.18);}
+  .partner.sel{border-color:var(--gold-deep); background:rgba(224,184,74,.22); box-shadow:0 0 0 1px var(--gold-deep) inset;}
+  .pswatch{width:14px; height:14px; border-radius:4px; border:1.5px solid var(--wood-dark);}
+  .pcards{font-size:10px; color:var(--ink-soft);}
+  .steppers{display:grid; grid-template-columns:repeat(5,1fr); gap:6px;}
+  .stepper{display:flex; flex-direction:column; align-items:center; gap:4px;}
+  .st-swatch{width:100%; text-align:center; font-size:9.5px; font-weight:700; border-radius:6px; padding:3px 0;}
+  .st-ctl{display:flex; align-items:center; gap:4px;}
+  .st-ctl button{width:20px; height:20px; border-radius:6px; border:1px solid rgba(107,79,46,.4);
+    background:rgba(255,255,255,.6); cursor:pointer; font-size:13px; line-height:1; color:var(--ink);}
+  .st-ctl button:disabled{opacity:.3; cursor:not-allowed;}
+  .st-val{font-family:'Cinzel',serif; font-weight:700; font-size:13px; min-width:14px; text-align:center;}
+  .st-max{font-size:9px; color:var(--ink-soft);}
+  .stepper-hint{font-size:12px; color:var(--ink-soft); font-style:italic; padding:6px 0;}
+  .offer-card{background:rgba(255,255,255,.4); border:1px solid rgba(107,79,46,.25); border-radius:10px;
+    padding:12px 14px; margin-bottom:16px;}
+  .offer-row{display:flex; justify-content:space-between; gap:10px; font-size:13px; padding:4px 0;}
+  .offer-side{font-weight:700;}
+  .offer-arrow{text-align:center; color:var(--gold-deep); font-size:16px;}
+
   @media (max-width:880px){
     .wrap{flex-direction:column;}
     .panel{flex:1 1 auto; width:100%;}
@@ -231,6 +285,11 @@
   </div>
 </div>
 
+<!-- Trade dialog -->
+<div class="overlay hidden" id="tradeOverlay">
+  <div class="modal trade-modal" id="tradeModal"></div>
+</div>
+
 <script>
 "use strict";
 const SVGNS="http://www.w3.org/2000/svg";
@@ -265,7 +324,7 @@ const R=48, W=Math.sqrt(3)*R, VD=1.5*R, CX0=300, CY0=295;
 const COUNTS_SMALL=[3,4,5,4,3];        // 19-hex board (3-4 players)
 const COUNTS_LARGE=[3,4,5,6,5,4,3];    // 30-hex 5-6 extension board (5-6 players)
 let COUNTS=COUNTS_SMALL;
-let hexes=[], vertices=[], edges=[];
+let hexes=[], vertices=[], edges=[], harbours=[];
 
 function buildGeometry(){
   hexes=[]; vertices=[]; edges=[];
@@ -322,6 +381,32 @@ function assignTiles(){
   });
   // robber starts on a desert (one of the two on the large board)
   return deserts[Math.floor(Math.random()*deserts.length)];
+}
+
+/* Place harbours (ports) on coastal boundary edges, spread around the coast.
+   type "3:1" = generic; a resource name = 2:1 for that resource. */
+function assignHarbours(){
+  harbours=[];
+  // boundary edges = edges touching only one hex; order them around the coast by angle
+  const boundary=edges.filter(e=>e.hexes.length===1).map(e=>{
+    const a=vertices[e.v1], b=vertices[e.v2];
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+    return {e, ang:Math.atan2(my-CY0,mx-CX0)};
+  }).sort((p,q)=>p.ang-q.ang);
+  let types;
+  if(hexes.length===30){
+    // 30-hex board: 5 generic 3:1 and 6 specific 2:1 (wheat repeated)
+    types=["3:1","3:1","3:1","3:1","3:1","wood","brick","sheep","wheat","ore","wheat"];
+  } else {
+    // 19-hex board: 4 generic 3:1 and 5 specific 2:1 (one of each resource)
+    types=["3:1","3:1","3:1","3:1","wood","brick","sheep","wheat","ore"];
+  }
+  shuffle(types);
+  const n=types.length, step=boundary.length/n;
+  for(let i=0;i<n;i++){
+    const e=boundary[Math.floor(i*step)].e;
+    harbours.push({edge:e.id, v1:e.v1, v2:e.v2, type:types[i]});
+  }
 }
 
 /* ---------------- Game state ---------------- */
@@ -396,6 +481,7 @@ function startGame(){
   COUNTS=(n>=5)?COUNTS_LARGE:COUNTS_SMALL;   // larger board for 5-6 players
   buildGeometry();
   const robberHex=assignTiles();
+  assignHarbours();
   S={
     nPlayers:n,
     players:Array.from({length:n},(_,i)=>({i,resources:{wood:0,brick:0,sheep:0,wheat:0,ore:0},vp:0})),
@@ -437,6 +523,24 @@ function totalCards(p){return RES_ORDER.reduce((s,r)=>s+S.players[p].resources[r
 function canAfford(p,cost){return Object.keys(cost).every(r=>S.players[p].resources[r]>=cost[r]);}
 function pay(p,cost){Object.keys(cost).forEach(r=>S.players[p].resources[r]-=cost[r]);}
 function costText(cost){return Object.keys(cost).map(r=>cost[r]+" "+RES_SHORT[r].toLowerCase()).join(", ");}
+
+/* Harbours a player can use (settlement or city on one of the harbour's vertices). */
+function playerHarbours(p){
+  return harbours.filter(h=>{
+    const b1=S.buildings[h.v1], b2=S.buildings[h.v2];
+    return (b1&&b1.player===p)||(b2&&b2.player===p);
+  });
+}
+function harbourLabel(t){ return t==="3:1" ? "3:1" : "2:1 "+RES_SHORT[t]; }
+// Best maritime rate for giving resource `res`: 4 (bank), 3 (generic harbour) or 2 (matching 2:1).
+function harbourRate(p,res){
+  let rate=4;
+  playerHarbours(p).forEach(h=>{
+    if(h.type==="3:1") rate=Math.min(rate,3);
+    else if(h.type===res) rate=Math.min(rate,2);
+  });
+  return rate;
+}
 
 function hasOwnRoadAt(vid,p){return vertices[vid].edges.some(eid=>S.roads[eid]===p);}
 function roadConnected(eid,p){
@@ -597,6 +701,9 @@ function drawStaticBoard(){
   boundary.forEach(e=>{const a=vertices[e.v1],b=vertices[e.v2];
     el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:"#6b4f2e",["stroke-width"]:13,["stroke-linecap"]:"round"},frame);});
 
+  // harbours (ports) on the coast
+  drawHarbours(el("g",{},svg));
+
   // tiles
   const gTiles=el("g",{},svg);
   hexes.forEach((h,hi)=>{
@@ -619,6 +726,35 @@ function drawStaticBoard(){
   el("rect",{x:11,y:11,width:578,height:568,rx:6,fill:"none",stroke:"rgba(224,184,74,.25)",["stroke-width"]:1,["pointer-events"]:"none"},svg);
 
   drawTokens();
+}
+function drawHarbours(g){
+  harbours.forEach(h=>{
+    const a=vertices[h.v1], b=vertices[h.v2];
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+    let dx=mx-CX0, dy=my-CY0; const d=Math.hypot(dx,dy)||1; dx/=d; dy/=d;
+    const lx=mx+dx*23, ly=my+dy*23;                 // badge sits just off the coast in the water
+    const spec=(h.type!=="3:1");
+    const fill=spec?TILE_COLORS[h.type]:"#caa86a";
+    const dark=(h.type==="sheep"||h.type==="wheat"||h.type==="3:1"); // text colour for legibility
+    // dock ropes from the two coastal vertices to the badge
+    [a,b].forEach(v=>el("line",{x1:v.x,y1:v.y,x2:lx,y2:ly,stroke:"rgba(58,42,26,.5)",
+      ["stroke-width"]:2.2,["stroke-linecap"]:"round"},g));
+    el("circle",{cx:a.x,cy:a.y,r:3.4,fill:"#3a2a1a"},g);
+    el("circle",{cx:b.x,cy:b.y,r:3.4,fill:"#3a2a1a"},g);
+    // badge
+    const bw=spec?34:26, bh=spec?19:16;
+    el("rect",{x:lx-bw/2,y:ly-bh/2,width:bw,height:bh,rx:5,fill,stroke:"#3a2a1a",
+      ["stroke-width"]:1.4},g);
+    const rate=el("text",{x:lx,y:spec?ly-3:ly,["text-anchor"]:"middle",["dominant-baseline"]:"central",
+      ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:9.5,
+      fill:dark?"#2c2117":"#fff"},g);
+    rate.textContent=spec?"2:1":"3:1";
+    if(spec){
+      el("text",{x:lx,y:ly+6,["text-anchor"]:"middle",["dominant-baseline"]:"central",
+        ["font-family"]:"'Outfit',sans-serif",["font-weight"]:600,["font-size"]:6,
+        ["letter-spacing"]:"0.4px",fill:dark?"#2c2117":"#fff"},g).textContent=RES_SHORT[h.type].toUpperCase();
+    }
+  });
 }
 function drawCompass(g,cx,cy,r){
   // 8-point star
@@ -722,13 +858,21 @@ function renderPlayers(){
     const card=document.createElement("div"); card.className="pcard"+(active?" active":"");
     let chips="";
     RES_ORDER.forEach(r=>{chips+=`<span class="chip" style="background:${TILE_COLORS[r]};${r==='sheep'||r==='wheat'?'color:#3a2e10;':''}"><span class="c-lab">${RES_SHORT[r]}</span>${pl.resources[r]}</span>`;});
+    let hbHtml="";
+    const hs=playerHarbours(pl.i);
+    if(hs.length){
+      const counts={};
+      hs.forEach(h=>{const k=harbourLabel(h.type);counts[k]=(counts[k]||0)+1;});
+      const txt=Object.keys(counts).map(k=>k+(counts[k]>1?" ×"+counts[k]:"")).join(" · ");
+      hbHtml=`<div class="harbour-line" title="Harbours this player can trade at">⚓ ${txt}</div>`;
+    }
     card.innerHTML=`
       <div class="prow" style="width:100%">
         <span class="swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>
         <span class="pname">${PLAYER_NAMES[pl.i]}</span>
         <span class="vp">${pl.vp}<small> VP</small></span>
       </div>
-      <div class="pcard-body"><div class="res-chips">${chips}</div></div>`;
+      <div class="pcard-body"><div class="res-chips">${chips}</div>${hbHtml}</div>`;
     box.appendChild(card);
   });
 }
@@ -772,7 +916,8 @@ function renderActions(){
   mk("Build road","",()=>tryMode("road"),!canAct,"1 wood · 1 brick");
   mk("Build settlement","",()=>tryMode("settlement"),!canAct,"wood·brick·sheep·wheat");
   mk("Build city","",()=>tryMode("city"),!canAct,"3 ore · 2 wheat");
-  mk("End turn","",endTurn,!canAct);
+  mk("Trade","",openTrade,!canAct,"bank · harbour · player");
+  mk("End turn","span2",endTurn,!canAct);
   if(S.mode&&S.mode!=="robber") mk("Cancel placement","cancel span2",cancelMode);
 }
 function renderLog(){
@@ -785,11 +930,193 @@ function renderAll(){
   renderDice(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
 }
 
+/* ================= TRADING ================= */
+let TRADE=null;
+const zeroRes=()=>({wood:0,brick:0,sheep:0,wheat:0,ore:0});
+
+function openTrade(){
+  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber) return;
+  S.mode=null;                       // clear any pending build placement
+  TRADE={screen:"menu"};
+  $("tradeOverlay").classList.remove("hidden");
+  renderTrade(); renderAll();
+}
+function closeTrade(){ TRADE=null; $("tradeOverlay").classList.add("hidden"); checkWin(); renderAll(); }
+
+function tradeGoto(screen){
+  if(screen==="bank"||screen==="harbour") TRADE={screen, give:null, receive:null};
+  else if(screen==="player") TRADE={screen, stage:"build", partner:null, give:zeroRes(), receive:zeroRes()};
+  else TRADE={screen:"menu"};
+  renderTrade();
+}
+function renderTrade(){
+  if(!TRADE) return;
+  const m=$("tradeModal");
+  if(TRADE.screen==="menu") m.innerHTML=tradeMenuHTML();
+  else if(TRADE.screen==="bank") m.innerHTML=maritimeHTML(false);
+  else if(TRADE.screen==="harbour") m.innerHTML=maritimeHTML(true);
+  else if(TRADE.screen==="player") m.innerHTML=playerTradeHTML();
+}
+
+function tradeMenuHTML(){
+  const p=S.cur, hasH=playerHarbours(p).length>0;
+  return `
+    <div class="trade-head"><h2>Trade</h2><span class="trade-who">${PLAYER_NAMES[p]}'s turn</span></div>
+    <p class="trade-intro">Trade away resources to get what you need. Available only on your turn, after rolling.</p>
+    <div class="trade-menu">
+      <button class="trade-opt" onclick="tradeGoto('bank')">
+        <span class="to-title">Bank · 4:1</span><span class="to-sub">Give 4 of one resource for 1 of any.</span></button>
+      <button class="trade-opt" ${hasH?"":"disabled"} onclick="tradeGoto('harbour')">
+        <span class="to-title">Harbour · 3:1 / 2:1</span>
+        <span class="to-sub">${hasH?"Use the better rates from your ports.":"You have no harbour access yet."}</span></button>
+      <button class="trade-opt" onclick="tradeGoto('player')">
+        <span class="to-title">Player</span><span class="to-sub">Offer a swap to an opponent.</span></button>
+    </div>
+    <div class="trade-foot"><button class="btn cancel" onclick="closeTrade()">Close</button></div>`;
+}
+
+function resCellHTML(r,selected,disabled,sub,handler){
+  const dark=(r==="sheep"||r==="wheat");
+  return `<button class="res-cell${selected?" sel":""}" ${disabled?"disabled":""}
+    style="--rc:${TILE_COLORS[r]};${dark?"color:#2c2117;":"color:#fff;"}" onclick="${handler}">
+    <span class="rc-name">${RES_SHORT[r]}</span>${sub?`<span class="rc-sub">${sub}</span>`:""}</button>`;
+}
+function tradePickGive(r){ TRADE.give=r; if(TRADE.receive===r) TRADE.receive=null; renderTrade(); }
+function tradePickReceive(r){ if(TRADE.give===r) return; TRADE.receive=r; renderTrade(); }
+
+function maritimeHTML(harbour){
+  const p=S.cur;
+  const giveRow=RES_ORDER.map(r=>{
+    const rate=harbour?harbourRate(p,r):4;
+    return resCellHTML(r,TRADE.give===r,S.players[p].resources[r]<rate,
+      "have "+S.players[p].resources[r]+" · "+rate+":1",`tradePickGive('${r}')`);
+  }).join("");
+  const recvRow=RES_ORDER.map(r=>
+    resCellHTML(r,TRADE.receive===r,TRADE.give===r,"",`tradePickReceive('${r}')`)).join("");
+  const rate=TRADE.give?(harbour?harbourRate(p,TRADE.give):4):null;
+  const ready=TRADE.give&&TRADE.receive&&TRADE.give!==TRADE.receive&&S.players[p].resources[TRADE.give]>=rate;
+  let summary="Pick a resource to give, then one to receive.";
+  if(TRADE.give&&TRADE.receive&&TRADE.give!==TRADE.receive)
+    summary=`Give <strong>${rate} ${RES_SHORT[TRADE.give]}</strong> → receive <strong>1 ${RES_SHORT[TRADE.receive]}</strong>.`;
+  let ports="";
+  if(harbour){
+    const counts={}; playerHarbours(p).forEach(h=>{const k=harbourLabel(h.type);counts[k]=(counts[k]||0)+1;});
+    ports=`<div class="trade-ports">⚓ Your harbours: ${Object.keys(counts).map(k=>k+(counts[k]>1?" ×"+counts[k]:"")).join(" · ")}</div>`;
+  }
+  return `
+    <div class="trade-head"><h2>${harbour?"Harbour trade":"Bank trade"}</h2><span class="trade-who">${PLAYER_NAMES[p]}</span></div>
+    ${ports}
+    <div class="trade-block"><div class="tb-lab">You give</div><div class="res-grid">${giveRow}</div></div>
+    <div class="trade-block"><div class="tb-lab">You receive (1)</div><div class="res-grid">${recvRow}</div></div>
+    <div class="trade-summary">${summary}</div>
+    <div class="trade-foot">
+      <button class="btn cancel" onclick="tradeGoto('menu')">Back</button>
+      <button class="btn primary" ${ready?"":"disabled"} onclick="doMaritimeTrade(${harbour})">Confirm trade</button>
+    </div>`;
+}
+function doMaritimeTrade(harbour){
+  const p=S.cur, g=TRADE.give, rc=TRADE.receive;
+  if(!g||!rc||g===rc) return;
+  const rate=harbour?harbourRate(p,g):4;
+  if(S.players[p].resources[g]<rate) return;
+  S.players[p].resources[g]-=rate; S.players[p].resources[rc]+=1;
+  pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[g].toLowerCase()+" for 1 "+RES_SHORT[rc].toLowerCase()+
+    (harbour?" at a harbour ("+rate+":1).":" with the bank (4:1)."),true);
+  closeTrade();
+}
+
+function playerTradeHTML(){
+  const p=S.cur;
+  if(TRADE.stage==="respond") return playerRespondHTML();
+  const partners=S.players.filter(pl=>pl.i!==p).map(pl=>
+    `<button class="partner${TRADE.partner===pl.i?" sel":""}" onclick="tradePickPartner(${pl.i})">
+      <span class="pswatch" style="background:${PLAYER_COLORS[pl.i]}"></span><span>${PLAYER_NAMES[pl.i]}</span>
+      <span class="pcards">${totalCards(pl.i)} cards</span></button>`).join("");
+  const giveSteppers=stepperRowHTML("give",p);
+  const recvSteppers=TRADE.partner==null
+    ? `<div class="stepper-hint">Choose an opponent first.</div>` : stepperRowHTML("receive",TRADE.partner);
+  const gSum=RES_ORDER.reduce((s,r)=>s+TRADE.give[r],0);
+  const rSum=RES_ORDER.reduce((s,r)=>s+TRADE.receive[r],0);
+  const ready=TRADE.partner!=null&&gSum>0&&rSum>0;
+  return `
+    <div class="trade-head"><h2>Player trade</h2><span class="trade-who">${PLAYER_NAMES[p]} offers</span></div>
+    <div class="trade-block"><div class="tb-lab">Trade with</div><div class="partners">${partners}</div></div>
+    <div class="trade-block"><div class="tb-lab">You give</div>${giveSteppers}</div>
+    <div class="trade-block"><div class="tb-lab">You ask for</div>${recvSteppers}</div>
+    <div class="trade-foot">
+      <button class="btn cancel" onclick="tradeGoto('menu')">Back</button>
+      <button class="btn primary" ${ready?"":"disabled"} onclick="tradeSendOffer()">Send offer →</button>
+    </div>`;
+}
+function stepperRowHTML(side,owner){
+  const obj=TRADE[side];
+  return `<div class="steppers">`+RES_ORDER.map(r=>{
+    const val=obj[r], max=S.players[owner].resources[r], dark=(r==="sheep"||r==="wheat");
+    return `<div class="stepper">
+      <div class="st-swatch" style="background:${TILE_COLORS[r]};${dark?"color:#2c2117":"color:#fff"}">${RES_SHORT[r]}</div>
+      <div class="st-ctl">
+        <button ${val<=0?"disabled":""} onclick="tradeAdjust('${side}','${r}',-1)">−</button>
+        <span class="st-val">${val}</span>
+        <button ${val>=max?"disabled":""} onclick="tradeAdjust('${side}','${r}',1)">+</button>
+      </div><div class="st-max">/ ${max}</div></div>`;
+  }).join("")+`</div>`;
+}
+function tradeAdjust(side,r,delta){
+  const owner=(side==="give")?S.cur:TRADE.partner;
+  if(owner==null) return;
+  const max=S.players[owner].resources[r];
+  TRADE[side][r]=Math.max(0,Math.min(max,TRADE[side][r]+delta));
+  renderTrade();
+}
+function tradePickPartner(i){
+  TRADE.partner=i;
+  RES_ORDER.forEach(r=>{ TRADE.receive[r]=Math.min(TRADE.receive[r],S.players[i].resources[r]); });
+  renderTrade();
+}
+function tradeSendOffer(){
+  const gSum=RES_ORDER.reduce((s,r)=>s+TRADE.give[r],0);
+  const rSum=RES_ORDER.reduce((s,r)=>s+TRADE.receive[r],0);
+  if(TRADE.partner==null||gSum===0||rSum===0) return;
+  TRADE.stage="respond"; renderTrade();
+}
+function tradeBackToBuild(){ TRADE.stage="build"; renderTrade(); }
+function resList(obj){ const a=RES_ORDER.filter(r=>obj[r]>0).map(r=>obj[r]+" "+RES_SHORT[r]); return a.length?a.join(", "):"nothing"; }
+function playerRespondHTML(){
+  const p=S.cur, q=TRADE.partner;
+  return `
+    <div class="trade-head"><h2>Offer to ${PLAYER_NAMES[q]}</h2></div>
+    <p class="trade-intro">Pass the device to <strong>${PLAYER_NAMES[q]}</strong> to respond.</p>
+    <div class="offer-card">
+      <div class="offer-row"><span class="offer-side" style="color:${PLAYER_COLORS[p]}">${PLAYER_NAMES[p]} gives</span><span>${resList(TRADE.give)}</span></div>
+      <div class="offer-arrow">⇅</div>
+      <div class="offer-row"><span class="offer-side" style="color:${PLAYER_COLORS[q]}">${PLAYER_NAMES[q]} gives</span><span>${resList(TRADE.receive)}</span></div>
+    </div>
+    <div class="trade-foot">
+      <button class="btn cancel" onclick="tradeBackToBuild()">Edit</button>
+      <button class="btn" style="border-color:#9c3b30;color:#9c3b30;background:transparent" onclick="tradeRespond(false)">Decline</button>
+      <button class="btn primary" onclick="tradeRespond(true)">Accept</button>
+    </div>`;
+}
+function tradeRespond(accept){
+  const p=S.cur, q=TRADE.partner;
+  if(!accept){ pushLog(PLAYER_NAMES[q]+" declines "+PLAYER_NAMES[p]+"'s offer."); closeTrade(); return; }
+  const giveOk=RES_ORDER.every(r=>S.players[p].resources[r]>=TRADE.give[r]);
+  const recvOk=RES_ORDER.every(r=>S.players[q].resources[r]>=TRADE.receive[r]);
+  if(!giveOk||!recvOk){ pushLog("Trade failed — the resources are no longer available.",true); closeTrade(); return; }
+  RES_ORDER.forEach(r=>{
+    S.players[p].resources[r]-=TRADE.give[r]; S.players[q].resources[r]+=TRADE.give[r];
+    S.players[q].resources[r]-=TRADE.receive[r]; S.players[p].resources[r]+=TRADE.receive[r];
+  });
+  pushLog(PLAYER_NAMES[p]+" and "+PLAYER_NAMES[q]+" trade — "+PLAYER_NAMES[p]+" gives "+resList(TRADE.give)+", gets "+resList(TRADE.receive)+".",true);
+  closeTrade();
+}
+
 /* ---------------- Init ---------------- */
 $("newGameBtn").addEventListener("click",()=>{renderSetup();$("overlay").classList.remove("hidden");});
 buildGeometry();
 // draw an idle board behind the start overlay
 assignTiles();
+assignHarbours();
 drawStaticBoard();
 renderSetup();
 </script>
