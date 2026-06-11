@@ -259,7 +259,7 @@
 
 <div class="wrap">
   <div class="board-card">
-    <svg id="board" viewBox="0 0 600 590" role="img" aria-label="Catan board"></svg>
+    <svg id="board" viewBox="-50 -50 700 690" role="img" aria-label="Catan board"></svg>
   </div>
 
   <aside class="panel">
@@ -887,7 +887,10 @@ function drawStaticBoard(){
   el("stop",{offset:"55%","stop-color":"#12434e"},sea);
   el("stop",{offset:"100%","stop-color":"#0b2c34"},sea);
 
-  el("rect",{x:0,y:0,width:600,height:590,rx:10,fill:"url(#seaGrad)"},svg);
+  // size the sea so the far-out harbour boats always fit, keeping the island centred
+  const vb=boardViewBox();
+  svg.setAttribute("viewBox",`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  el("rect",{x:vb.x,y:vb.y,width:vb.w,height:vb.h,rx:10,fill:"url(#seaGrad)"},svg);
   // map border (decorative, on top last) — placeholder group order
   // compass rose (in water, bottom-left)
   drawCompass(el("g",{class:"compass"},svg),74,508,30);
@@ -921,39 +924,88 @@ function drawStaticBoard(){
   layers.interact=el("g",{},svg);
 
   // top map border
-  el("rect",{x:6,y:6,width:588,height:578,rx:8,fill:"none",stroke:"rgba(224,184,74,.5)",["stroke-width"]:1.5,["pointer-events"]:"none"},svg);
-  el("rect",{x:11,y:11,width:578,height:568,rx:6,fill:"none",stroke:"rgba(224,184,74,.25)",["stroke-width"]:1,["pointer-events"]:"none"},svg);
+  el("rect",{x:vb.x+6,y:vb.y+6,width:vb.w-12,height:vb.h-12,rx:8,fill:"none",stroke:"rgba(224,184,74,.5)",["stroke-width"]:1.5,["pointer-events"]:"none"},svg);
+  el("rect",{x:vb.x+11,y:vb.y+11,width:vb.w-22,height:vb.h-22,rx:6,fill:"none",stroke:"rgba(224,184,74,.25)",["stroke-width"]:1,["pointer-events"]:"none"},svg);
 
   drawTokens();
+}
+// Symmetric viewBox (island centred) sized to clear the far-out harbour boats on the current board.
+function boardViewBox(){
+  let mx=0,my=0;
+  edges.filter(e=>e.hexes.length===1).forEach(e=>{
+    const a=vertices[e.v1], b=vertices[e.v2];
+    const ox=(a.x+b.x)/2, oy=(a.y+b.y)/2;
+    const ex=b.x-a.x, ey=b.y-a.y, L=Math.hypot(ex,ey)||1;
+    let nx=-ey/L, ny=ex/L; if(nx*(ox-CX0)+ny*(oy-CY0)<0){ nx=-nx; ny=-ny; }
+    const fc=54+7+22+10;                       // flag-centre distance out to sea (matches drawHarbours)
+    const fx=ox+nx*fc, fy=oy+ny*fc;
+    mx=Math.max(mx, Math.abs(fx-CX0)+21);      // flag half-width (15) + slack
+    my=Math.max(my, Math.abs(fy-CY0)+16);      // flag half-height (10) + slack
+  });
+  return {x:CX0-mx, y:CY0-my, w:2*mx, h:2*my};
 }
 function drawHarbours(g){
   harbours.forEach(h=>{
     const a=vertices[h.v1], b=vertices[h.v2];
     const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
-    let dx=mx-CX0, dy=my-CY0; const d=Math.hypot(dx,dy)||1; dx/=d; dy/=d;
-    const lx=mx+dx*23, ly=my+dy*23;                 // badge sits just off the coast in the water
+    // outward perpendicular bisector of the coastal edge (boat stays centred & equidistant from a,b)
+    const ex=b.x-a.x, ey=b.y-a.y, elen=Math.hypot(ex,ey)||1;
+    const tx=ex/elen, ty=ey/elen;                       // along the coast
+    let nx=-ty, ny=tx;                                  // perpendicular to the edge
+    if(nx*(mx-CX0)+ny*(my-CY0)<0){ nx=-nx; ny=-ny; }    // make it point outward, to open sea
+    const DIST=54;                                      // hull sits well out, clear of tiles & tokens
+    const cx=mx+nx*DIST, cy=my+ny*DIST;                 // hull centre, on the bisector
+    const P=(s,t)=>[cx+tx*s+nx*t, cy+ty*s+ny*t];        // local frame: s=along coast, t=out to sea
+
     const spec=(h.type!=="3:1");
-    const fill=spec?TILE_COLORS[h.type]:"#caa86a";
-    const dark=(h.type==="sheep"||h.type==="wheat"||h.type==="3:1"); // text colour for legibility
-    // dock ropes from the two coastal vertices to the badge
-    [a,b].forEach(v=>el("line",{x1:v.x,y1:v.y,x2:lx,y2:ly,stroke:"rgba(58,42,26,.5)",
-      ["stroke-width"]:2.2,["stroke-linecap"]:"round"},g));
-    el("circle",{cx:a.x,cy:a.y,r:3.4,fill:"#3a2a1a"},g);
-    el("circle",{cx:b.x,cy:b.y,r:3.4,fill:"#3a2a1a"},g);
-    // badge
-    const bw=spec?34:26, bh=spec?19:16;
-    el("rect",{x:lx-bw/2,y:ly-bh/2,width:bw,height:bh,rx:5,fill,stroke:"#3a2a1a",
-      ["stroke-width"]:1.4},g);
-    const rate=el("text",{x:lx,y:spec?ly-3:ly,["text-anchor"]:"middle",["dominant-baseline"]:"central",
-      ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:9.5,
-      fill:dark?"#2c2117":"#fff"},g);
-    rate.textContent=spec?"2:1":"3:1";
-    if(spec){
-      el("text",{x:lx,y:ly+6,["text-anchor"]:"middle",["dominant-baseline"]:"central",
-        ["font-family"]:"'Outfit',sans-serif",["font-weight"]:600,["font-size"]:6,
-        ["letter-spacing"]:"0.4px",fill:dark?"#2c2117":"#fff"},g).textContent=RES_SHORT[h.type].toUpperCase();
-    }
+    const flagFill=spec?TILE_COLORS[h.type]:"#bda47c";  // resource colour, or neutral wood/grey for 3:1
+    const lightFlag=(h.type==="sheep"||h.type==="wheat"||h.type==="3:1");
+    const txtCol=lightFlag?"#2c2117":"#fff";            // legible text on the flag
+
+    // two wooden plank piers, mirror images, from each coastal spot out to the boat
+    drawPier(g, a.x,a.y, P(-6,-8));
+    drawPier(g, b.x,b.y, P( 6,-8));
+    el("circle",{cx:a.x,cy:a.y,r:3.6,fill:"#5a3f22",stroke:"#3a2a1a",["stroke-width"]:1},g);
+    el("circle",{cx:b.x,cy:b.y,r:3.6,fill:"#5a3f22",stroke:"#3a2a1a",["stroke-width"]:1},g);
+
+    // boat hull (deck faces out to sea, keel toward the island)
+    const HW=17;
+    const hull=[P(-HW,7),P(HW,7),P(11,-5),P(0,-13),P(-11,-5)];
+    el("path",{d:`M${hull[0]} L${hull[1]} L${hull[2]} Q${hull[3]} ${hull[4]} Z`,
+      fill:"#8a5a2b",stroke:"#3a2a1a",["stroke-width"]:1.6,["stroke-linejoin"]:"round"},g);
+    el("line",{x1:P(-HW+3,7)[0],y1:P(-HW+3,7)[1],x2:P(HW-3,7)[0],y2:P(HW-3,7)[1],
+      stroke:"#c79a5c",["stroke-width"]:2.4,["stroke-linecap"]:"round"},g);
+
+    // mast running outward to the flag
+    const deck=P(0,7);
+    const flagCdist=7+22+10;                            // deck + mast + half flag, measured from hull centre
+    const fx=cx+nx*flagCdist, fy=cy+ny*flagCdist;       // flag centre, out in open water
+    el("line",{x1:deck[0],y1:deck[1],x2:fx,y2:fy,stroke:"#5a3f22",["stroke-width"]:2.6,["stroke-linecap"]:"round"},g);
+    el("circle",{cx:fx,cy:fy-10,r:2,fill:"#5a3f22"},g); // mast top knob
+
+    // flag/banner: axis-aligned for legibility, coloured by the harbour's resource
+    const FW=30, FH=20;
+    el("rect",{x:fx-FW/2,y:fy-FH/2,width:FW,height:FH,rx:4,fill:flagFill,stroke:"#3a2a1a",["stroke-width"]:1.4},g);
+    el("text",{x:fx,y:fy-4,["text-anchor"]:"middle",["dominant-baseline"]:"central",
+      ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:10,fill:txtCol},g)
+      .textContent=spec?"2:1":"3:1";
+    el("text",{x:fx,y:fy+6,["text-anchor"]:"middle",["dominant-baseline"]:"central",
+      ["font-family"]:"'Outfit',sans-serif",["font-weight"]:600,["font-size"]:7,
+      ["letter-spacing"]:"0.3px",fill:txtCol},g)
+      .textContent=spec?RES_SHORT[h.type].toUpperCase():"ANY";
   });
+}
+// A wooden plank walkway (pier) from a coastal spot (x1,y1) out to a boat dock point [x2,y2].
+function drawPier(g, x1,y1, [x2,y2]){
+  const dx=x2-x1, dy=y2-y1, len=Math.hypot(dx,dy)||1;
+  const ux=dx/len, uy=dy/len, px=-uy, py=ux;            // along & across the walkway
+  const HW=4.2;                                         // half board width
+  const c=(s,w)=>[x1+ux*s+px*w, y1+uy*s+py*w];
+  const pts=[c(0,HW),c(len,HW),c(len,-HW),c(0,-HW)];
+  el("polygon",{points:pts.join(" "),fill:"#a9824e",stroke:"#5a3f22",["stroke-width"]:1.2},g);
+  const planks=Math.max(2,Math.round(len/7));           // plank cross-lines
+  for(let i=1;i<planks;i++){const s=len*i/planks, e1=c(s,HW), e2=c(s,-HW);
+    el("line",{x1:e1[0],y1:e1[1],x2:e2[0],y2:e2[1],stroke:"#5a3f22",["stroke-width"]:0.9,opacity:.7},g);}
 }
 function drawCompass(g,cx,cy,r){
   // 8-point star
