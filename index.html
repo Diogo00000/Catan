@@ -1683,12 +1683,20 @@ function botSetup(){
 function botPickSetupRoad(p,anchor){
   const legal=legalRoads(p,true,anchor);
   if(legal.length===0) return null;
+  // Aim the road toward the best open spot we could actually settle later (seed only
+  // from this settlement so the first road touches it, as setup requires).
+  let r=pickRoadTarget(p,[anchor],3,ROAD_TARGET_MIN,2);
+  if(!r) r=pickRoadTarget(p,[anchor],4,0,2);        // relax the score bar before giving up
+  if(r){ const e=edges[r.edge]; if((e.v1===anchor||e.v2===anchor) && legal.includes(r.edge)) return r.edge; }
+  // Last resort (everything beyond is blocked): face productive land, and never a dead end.
   let best=legal[0],bv=-1e9;
   legal.forEach(eid=>{
     const e=edges[eid], far=(e.v1===anchor)?e.v2:e.v1;
-    let s=spotScore(far,p), look=-1e9;
-    vertices[far].adj.forEach(nb=>{ if(nb!==anchor && !S.buildings[nb]) look=Math.max(look,spotScore(nb,p)); });
-    s+=Math.max(0,look)*0.5;                       // also value where it lets us reach next
+    const prodVal=vertices[far].hexes.map(hi=>hexes[hi]).filter(h=>h.resource!=="desert"&&h.number!=null)
+      .reduce((s,h)=>s+pips(h.number),0);
+    const openOnward=vertices[far].adj.some(nb=>nb!==anchor && !S.buildings[nb] &&
+      vertices[nb].edges.some(o=>o!==eid && S.roads[o]===undefined)) ? 2 : -8;   // penalise dead ends
+    const s=prodVal+openOnward;
     if(s>bv){bv=s;best=eid;}
   });
   return best;
@@ -1771,14 +1779,14 @@ function botDoOneBuildOrPlay(){
   if(S.deck.length>0 && canAfford(p,COST.dev)){ buyDev(); return true; }
   return false;
 }
-function botBestRoad(p){
-  if(ownCount(p,"road")>=LIMIT.road) return null;
+/* Shortest road distances (in new roads) from a set of seed vertices, traversing
+   only still-empty edges and never extending through an opponent's building. */
+function roadReachFrom(p,seeds){
   const dist=new Array(vertices.length).fill(Infinity);
   const firstEdge=new Array(vertices.length).fill(-1);
   const q=[];
-  const inNet=v=>{ const b=S.buildings[v]; if(b&&b.player===p) return true; return vertices[v].edges.some(e=>S.roads[e]===p); };
-  vertices.forEach(v=>{ if(inNet(v.id)){ dist[v.id]=0; q.push(v.id); } });
-  for(let head=0;head<q.length;head++){            // multi-source BFS over still-empty edges
+  seeds.forEach(v=>{ if(dist[v]===Infinity){ dist[v]=0; q.push(v); } });
+  for(let head=0;head<q.length;head++){
     const v=q[head], b=S.buildings[v];
     if(b&&b.player!==p) continue;                  // can't extend through an opponent's building
     vertices[v].edges.forEach(eid=>{
@@ -1791,26 +1799,42 @@ function botBestRoad(p){
       }
     });
   }
-  let bestV=-1,bestVal=-1e9;
+  return {dist,firstEdge};
+}
+/* Pick the road that best starts a shortest path to an open vertex where the bot
+   could really build later — empty, distance-rule-legal, decent score, reachable.
+   Returns {edge,target,dist,score} or null when no such spot exists. */
+function pickRoadTarget(p,seeds,maxDist,minScore,distW){
+  const {dist,firstEdge}=roadReachFrom(p,seeds);
+  let bestV=-1,bestVal=-1e9,bestDist=0;
   vertices.forEach(v=>{
     const id=v.id;
-    if(dist[id]<1||dist[id]>4||!isFinite(dist[id])) return;
-    if(S.buildings[id]||!v.adj.every(nb=>!S.buildings[nb])) return;     // occupied or distance-rule blocked
+    if(dist[id]<1||dist[id]>maxDist||!isFinite(dist[id])) return;
+    if(S.buildings[id]||!v.adj.every(nb=>!S.buildings[nb])) return;   // occupied or blocked by the distance rule
     const sc=spotScore(id,p);
-    if(sc<ROAD_TARGET_MIN) return;
-    const val=sc-dist[id]*3;                        // prefer high value, nearby
-    if(val>bestVal){bestVal=val;bestV=id;}
+    if(sc<minScore) return;
+    const val=sc-dist[id]*(distW||3);
+    if(val>bestVal){ bestVal=val; bestV=id; bestDist=dist[id]; }
   });
-  if(bestV>=0){ const fe=firstEdge[bestV]; if(fe>=0 && S.roads[fe]===undefined) return fe; }
-  return null;
+  if(bestV<0) return null;
+  const fe=firstEdge[bestV];
+  if(fe<0||S.roads[fe]!==undefined) return null;
+  return {edge:fe,target:bestV,dist:bestDist,score:spotScore(bestV,p)};
+}
+function netSeeds(p){
+  const inNet=v=>{ const b=S.buildings[v]; if(b&&b.player===p) return true; return vertices[v].edges.some(e=>S.roads[e]===p); };
+  return vertices.filter(v=>inNet(v.id)).map(v=>v.id);
+}
+function botBestRoad(p){
+  if(ownCount(p,"road")>=LIMIT.road) return null;
+  const r=pickRoadTarget(p,netSeeds(p),4,ROAD_TARGET_MIN,3);
+  return r?r.edge:null;
 }
 function botPlaceFreeRoad(){
-  let eid=botBestRoad(S.cur);
-  if(eid==null){
-    const legal=legalRoads(S.cur,false,null);
-    if(legal.length===0){ S.mode=null; S.freeRoadsLeft=0; renderAll(); return; }
-    eid=legal[0];
-  }
+  const p=S.cur;
+  let eid=botBestRoad(p);
+  if(eid==null){ const r=pickRoadTarget(p,netSeeds(p),5,0,2); eid=r?r.edge:null; }  // any reachable buildable spot
+  if(eid==null){ S.mode=null; S.freeRoadsLeft=0; renderAll(); return; }             // nothing worth it — forfeit, never a road to nowhere
   commitRoad(eid);                                 // handles freeRoadsLeft and exiting the mode
 }
 function botTradeFor(cost){
