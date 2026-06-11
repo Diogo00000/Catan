@@ -111,6 +111,19 @@
   .chip .c-lab{font-weight:500; font-size:8.5px; letter-spacing:.5px; opacity:.85; text-transform:uppercase;}
   .pcard-body{flex:1 1 100%;}
   .prow{display:flex; align-items:center; gap:10px;}
+  .pstats{display:flex; flex-wrap:wrap; gap:4px 9px; margin-top:7px; font-size:10.5px; color:var(--ink-soft);}
+  .pstats b{font-weight:700; color:var(--wood-dark);}
+  .pawards{display:flex; gap:5px; margin-left:6px;}
+  .pawards .badge{font-size:8.5px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
+    border-radius:5px; padding:1px 5px; background:var(--gold-deep); color:var(--wood-dark);}
+
+  /* Development cards */
+  .dev-list{display:flex; flex-direction:column; gap:8px; margin-bottom:14px;}
+  .dev-row{display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:10px;
+    border:1px solid rgba(107,79,46,.3); background:rgba(255,255,255,.4);}
+  .dev-row-info{display:flex; flex-direction:column; gap:2px; flex:1 1 auto; min-width:0;}
+  .dev-row .btn{padding:7px 14px; flex:0 0 auto;}
+  .dev-n{font-family:'Cinzel',serif; color:var(--gold-deep);}
 
   /* Actions */
   .prompt{font-size:13px; line-height:1.5; color:var(--ink); background:rgba(107,79,46,.10);
@@ -300,6 +313,11 @@
   <div class="modal trade-modal" id="stealModal"></div>
 </div>
 
+<!-- Development-card dialog (buy / play) -->
+<div class="overlay hidden" id="devOverlay">
+  <div class="modal trade-modal" id="devModal"></div>
+</div>
+
 <script>
 "use strict";
 const SVGNS="http://www.w3.org/2000/svg";
@@ -325,9 +343,31 @@ let PLAYER_NAMES=PALETTE.slice(0,4).map(c=>c.name);
 const COST={
   road:{wood:1,brick:1},
   settlement:{wood:1,brick:1,sheep:1,wheat:1},
-  city:{ore:3,wheat:2}
+  city:{ore:3,wheat:2},
+  dev:{ore:1,wheat:1,sheep:1}
 };
 const LIMIT={settlement:5,city:4,road:15};
+
+/* Development cards. Deck of 25, shuffled when a game starts. */
+const DEV_TYPES=["knight","vp","road","plenty","mono"];
+const DEV_LABEL={knight:"Knight",vp:"Victory Point",road:"Road Building",plenty:"Year of Plenty",mono:"Monopoly"};
+const DEV_BLURB={
+  knight:"Move the robber and steal a card.",
+  vp:"Worth 1 victory point (always active).",
+  road:"Place 2 free roads.",
+  plenty:"Take any 2 resources from the bank.",
+  mono:"Name a resource; rivals hand over all they hold."
+};
+function newDevDeck(){
+  const deck=[];
+  for(let i=0;i<14;i++)deck.push("knight");
+  for(let i=0;i<5;i++)deck.push("vp");
+  for(let i=0;i<2;i++)deck.push("road");
+  for(let i=0;i<2;i++)deck.push("plenty");
+  for(let i=0;i<2;i++)deck.push("mono");
+  return shuffle(deck);
+}
+const zeroDev=()=>({knight:0,vp:0,road:0,plenty:0,mono:0});
 
 /* ---------------- Board geometry ---------------- */
 const R=48, W=Math.sqrt(3)*R, VD=1.5*R, CX0=300, CY0=295;
@@ -494,15 +534,24 @@ function startGame(){
   assignHarbours();
   S={
     nPlayers:n,
-    players:Array.from({length:n},(_,i)=>({i,resources:{wood:0,brick:0,sheep:0,wheat:0,ore:0},vp:0})),
+    players:Array.from({length:n},(_,i)=>({i,resources:{wood:0,brick:0,sheep:0,wheat:0,ore:0},vp:0,
+      dev:zeroDev(),          // development cards in hand, playable
+      devNew:zeroDev(),       // cards bought this turn — not yet playable
+      knights:0,              // Knight cards played (for Largest Army)
+      roadLen:0})),           // current longest-road length (for display)
     buildings:{},          // vertexId -> {player,type}
     roads:{},              // edgeId -> player
     robberHex,
+    devDeck:newDevDeck(),  // shuffled development-card deck
+    largestArmy:null,      // player index holding Largest Army (or null)
+    longestRoad:null,      // player index holding Longest Road (or null)
     phase:"setup",
     cur:0,
     hasRolled:false,
     mode:null,             // null|settlement|road|city|robber|setupSettlement|setupRoad
     pendingRobber:false,
+    playedDevThisTurn:false,
+    freeRoads:0,           // free roads remaining (Road Building card)
     lastSetupV:null,
     dice:[null,null],
     log:[]
@@ -528,6 +577,70 @@ function ownCount(p,type){
 function recomputeVP(){
   S.players.forEach(pl=>pl.vp=0);
   for(const vid in S.buildings){const b=S.buildings[vid];S.players[b.player].vp+=(b.type==="city"?2:1);}
+  // Victory Point development cards count silently toward the 10 needed to win.
+  S.players.forEach(pl=>{ pl.vp += pl.dev.vp + pl.devNew.vp; });
+  if(S.largestArmy!=null) S.players[S.largestArmy].vp+=2;
+  if(S.longestRoad!=null) S.players[S.longestRoad].vp+=2;
+}
+
+/* Largest Army — first to 3 played Knights, then to anyone with strictly more. */
+function updateLargestArmy(){
+  const me=S.cur, k=S.players[me].knights;
+  if(k<3 || S.largestArmy===me) return;
+  if(S.largestArmy==null || k>S.players[S.largestArmy].knights){
+    S.largestArmy=me;
+    pushLog(PLAYER_NAMES[me]+" claims the Largest Army (+2 VP)!",true);
+  }
+}
+
+/* Longest continuous road for player p: the longest trail through their connected
+   road segments, broken at any vertex holding an opponent's settlement or city. */
+function computeLongestRoad(p){
+  const myEdges=edges.filter(e=>S.roads[e.id]===p);
+  if(!myEdges.length) return 0;
+  const incident={};
+  myEdges.forEach(e=>{(incident[e.v1]=incident[e.v1]||[]).push(e.id);(incident[e.v2]=incident[e.v2]||[]).push(e.id);});
+  const blocked=v=>{const b=S.buildings[v];return b&&b.player!==p;};   // opponent building cuts the path
+  const used=new Set();
+  function dfs(v,canExtend){
+    let best=0;
+    if(canExtend){
+      for(const eid of incident[v]){
+        if(used.has(eid)) continue;
+        const e=edges[eid], nv=(e.v1===v)?e.v2:e.v1;
+        used.add(eid);
+        const branch=1+dfs(nv,!blocked(nv));
+        if(branch>best) best=branch;
+        used.delete(eid);
+      }
+    }
+    return best;
+  }
+  let best=0;
+  const starts=new Set(); myEdges.forEach(e=>{starts.add(e.v1);starts.add(e.v2);});
+  starts.forEach(v=>{ const l=dfs(v,true); if(l>best) best=l; });   // a trail may start at a blocked vertex
+  return best;
+}
+function updateLongestRoad(){
+  const lens=S.players.map(pl=>computeLongestRoad(pl.i));
+  S.players.forEach((pl,i)=>pl.roadLen=lens[i]);
+  let holder=S.longestRoad;
+  if(holder!=null && lens[holder]<5) holder=null;       // a cut road can drop below 5 and lose the award
+  const max=Math.max(0,...lens);
+  let newHolder=holder;
+  if(max>=5){
+    const tops=lens.map((l,p)=>({l,p})).filter(x=>x.l===max);
+    if(holder==null){
+      if(tops.length===1) newHolder=tops[0].p;          // unique longest claims it
+    } else if(lens[holder]<max){
+      if(tops.length===1) newHolder=tops[0].p;          // strictly longer takes it; a tie can't
+    }
+  }
+  if(newHolder!==S.longestRoad){
+    S.longestRoad=newHolder;
+    if(newHolder!=null) pushLog(PLAYER_NAMES[newHolder]+" takes the Longest Road (+2 VP)!",true);
+    else pushLog("The Longest Road is unclaimed.",true);
+  }
 }
 function totalCards(p){return RES_ORDER.reduce((s,r)=>s+S.players[p].resources[r],0);}
 function canAfford(p,cost){return Object.keys(cost).every(r=>S.players[p].resources[r]>=cost[r]);}
@@ -591,19 +704,20 @@ function commitSettlement(vid){
       if(got.length) pushLog(PLAYER_NAMES[S.cur]+" collects "+got.join(", ")+" from the second settlement.");
     }
     S.lastSetupV=vid; S.mode="setupRoad";
-    recomputeVP(); renderAll();
+    updateLongestRoad(); recomputeVP(); renderAll();
     return;
   }
   // normal play
   pay(S.cur,COST.settlement);
   S.buildings[vid]={player:S.cur,type:"settlement"};
   pushLog(PLAYER_NAMES[S.cur]+" builds a settlement.",true);
-  S.mode=null; recomputeVP(); checkWin(); renderAll();
+  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); renderAll();
 }
 function commitRoad(eid){
   if(S.phase==="setup"){
     S.roads[eid]=S.cur;
     S.setupIdx++;
+    updateLongestRoad();
     if(S.setupIdx<S.setupQueue.length){ beginSetupTurn(); }
     else { // setup complete
       S.phase="play"; S.cur=0; S.hasRolled=false; S.mode=null;
@@ -612,10 +726,20 @@ function commitRoad(eid){
     }
     return;
   }
+  if(S.freeRoads>0){          // Road Building card — these roads are free
+    S.roads[eid]=S.cur; S.freeRoads--;
+    pushLog(PLAYER_NAMES[S.cur]+" builds a free road.",true);
+    updateLongestRoad(); recomputeVP();
+    if(S.freeRoads>0 && ownCount(S.cur,"road")<LIMIT.road && legalRoads(S.cur,false,null).length>0){
+      // keep placing in road mode
+    } else { S.freeRoads=0; S.mode=null; }
+    checkWin(); renderAll();
+    return;
+  }
   pay(S.cur,COST.road);
   S.roads[eid]=S.cur;
   pushLog(PLAYER_NAMES[S.cur]+" builds a road.",true);
-  S.mode=null; renderAll();
+  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); renderAll();
 }
 function commitCity(vid){
   pay(S.cur,COST.city);
@@ -648,7 +772,7 @@ function finishRobber(victim){
       pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[victim]+".",true);
     }
   }
-  renderAll();
+  checkWin(); renderAll();
 }
 
 /* ---------------- Turn actions ---------------- */
@@ -685,17 +809,23 @@ function rollDice(){
   renderAll();
 }
 function endTurn(){
-  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber) return;
+  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber||S.mode==="robber") return;
+  // Cards bought this turn become playable from the owner's next turn on.
+  const ending=S.players[S.cur];
+  DEV_TYPES.forEach(t=>{ ending.dev[t]+=ending.devNew[t]; ending.devNew[t]=0; });
   S.cur=(S.cur+1)%S.nPlayers; S.hasRolled=false; S.mode=null; S.dice=[null,null];
+  S.playedDevThisTurn=false; S.freeRoads=0;
   renderAll();
 }
 function checkWin(){
-  if(S.players[S.cur].vp>=10){ S.phase="over"; S.winner=S.cur; }
+  if(S.phase==="over") return;
+  if(S.players[S.cur].vp>=10){ S.phase="over"; S.winner=S.cur; return; }
+  for(const pl of S.players){ if(pl.vp>=10){ S.phase="over"; S.winner=pl.i; return; } }
 }
 
 /* ---------------- Mode entry from buttons ---------------- */
 function tryMode(type){
-  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber){return;}
+  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber||S.mode==="robber"||S.freeRoads>0){return;}
   if(S.mode===type){ S.mode=null; renderAll(); return; } // toggle off
   const p=S.cur;
   if(!canAfford(p,COST[type])){ flash("Not enough resources — a "+type+" costs "+costText(COST[type])+"."); return; }
@@ -707,7 +837,159 @@ function tryMode(type){
   S.mode=type; renderAll();
 }
 function flash(msg){ const pr=$("prompt"); pr.textContent=msg; pr.style.borderColor="#9c3b30"; setTimeout(()=>{pr.style.borderColor="";renderPrompt();},1900); }
-function cancelMode(){ S.mode=null; renderAll(); }
+function cancelMode(){ S.mode=null; S.freeRoads=0; renderAll(); }
+
+/* ================= DEVELOPMENT CARDS ================= */
+let DEV=null;     // dev-card dialog state
+function devCount(p){ const pl=S.players[p]; return DEV_TYPES.reduce((s,t)=>s+pl.dev[t]+pl.devNew[t],0); }
+function canActNow(){ return S.phase==="play"&&S.hasRolled&&!S.pendingRobber&&S.mode!=="robber"&&S.freeRoads===0; }
+
+function buyDev(){
+  if(!canActNow()) return;
+  const p=S.cur;
+  if(S.devDeck.length===0){ flash("The development deck is empty."); return; }
+  if(!canAfford(p,COST.dev)){ flash("A development card costs "+costText(COST.dev)+"."); return; }
+  pay(p,COST.dev);
+  const card=S.devDeck.pop();
+  S.players[p].devNew[card]++;
+  pushLog(PLAYER_NAMES[p]+" buys a development card.",true);   // type stays hidden from rivals
+  recomputeVP(); checkWin(); renderAll();
+}
+
+// A dev card may be played only on your turn after rolling, at most one per turn,
+// and never the same turn it was bought (Victory Point cards are never actively played).
+function canPlayDevNow(){ return canActNow()&&!S.playedDevThisTurn; }
+function hasPlayableDev(p){ const d=S.players[p].dev; return d.knight+d.road+d.plenty+d.mono>0; }
+
+function openPlayDev(){
+  if(!canPlayDevNow()){
+    if(S.playedDevThisTurn) flash("You've already played a development card this turn.");
+    else flash("Development cards can be played on your turn, after rolling.");
+    return;
+  }
+  if(!hasPlayableDev(S.cur)){ flash("You have no playable development cards."); return; }
+  DEV={screen:"menu"};
+  $("devOverlay").classList.remove("hidden");
+  renderDev();
+}
+function closeDev(){ DEV=null; $("devOverlay").classList.add("hidden"); }
+function devGoto(screen){
+  if(screen==="plenty") DEV={screen, pick:zeroRes()};
+  else if(screen==="mono") DEV={screen, res:null};
+  else DEV={screen:"menu"};
+  renderDev();
+}
+function renderDev(){
+  if(!DEV) return;
+  const m=$("devModal");
+  if(DEV.screen==="menu") m.innerHTML=devMenuHTML();
+  else if(DEV.screen==="plenty") m.innerHTML=plentyHTML();
+  else if(DEV.screen==="mono") m.innerHTML=monoHTML();
+}
+function devMenuHTML(){
+  const p=S.cur, d=S.players[p].dev;
+  const row=(t,handler)=>{
+    const n=(t==="vp")?d.vp+S.players[p].devNew.vp:d[t];
+    const playable=(t!=="vp")&&n>0;
+    const action=t==="vp"
+      ? `<span class="to-sub">always active</span>`
+      : `<button class="btn ${playable?"primary":""}" ${playable?"":"disabled"} onclick="${handler}">Play</button>`;
+    return `<div class="dev-row">
+      <div class="dev-row-info"><span class="to-title">${DEV_LABEL[t]} <span class="dev-n">×${n}</span></span>
+        <span class="to-sub">${DEV_BLURB[t]}</span></div>${action}</div>`;
+  };
+  return `
+    <div class="trade-head"><h2>Development cards</h2><span class="trade-who">${PLAYER_NAMES[p]}</span></div>
+    <p class="trade-intro">Play one development card per turn. Cards bought this turn can't be played yet.</p>
+    <div class="dev-list">
+      ${row("knight","devPlayKnight()")}
+      ${row("road","devPlayRoad()")}
+      ${row("plenty","devGoto('plenty')")}
+      ${row("mono","devGoto('mono')")}
+      ${row("vp","")}
+    </div>
+    <div class="trade-foot"><button class="btn cancel" onclick="closeDev()">Close</button></div>`;
+}
+
+function devPlayKnight(){
+  const p=S.cur;
+  if(S.players[p].dev.knight<=0||!canPlayDevNow()) return;
+  S.players[p].dev.knight--; S.players[p].knights++; S.playedDevThisTurn=true;
+  pushLog(PLAYER_NAMES[p]+" plays a Knight.",true);
+  updateLargestArmy(); recomputeVP(); checkWin();
+  closeDev();
+  if(S.phase!=="over"){ S.mode="robber"; pushLog(PLAYER_NAMES[p]+" — move the robber.",true); }
+  renderAll();
+}
+function devPlayRoad(){
+  const p=S.cur;
+  if(S.players[p].dev.road<=0||!canPlayDevNow()) return;
+  if(ownCount(p,"road")>=LIMIT.road||legalRoads(p,false,null).length===0){
+    flash("No room to build a road right now."); return;
+  }
+  S.players[p].dev.road--; S.playedDevThisTurn=true;
+  S.freeRoads=2; S.mode="road";
+  pushLog(PLAYER_NAMES[p]+" plays Road Building — place 2 free roads.",true);
+  closeDev(); renderAll();
+}
+
+function plentyHTML(){
+  const sum=RES_ORDER.reduce((s,r)=>s+DEV.pick[r],0);
+  const steppers=`<div class="steppers">`+RES_ORDER.map(r=>{
+    const val=DEV.pick[r], dark=(r==="sheep"||r==="wheat");
+    return `<div class="stepper">
+      <div class="st-swatch" style="background:${TILE_COLORS[r]};${dark?"color:#2c2117":"color:#fff"}">${RES_SHORT[r]}</div>
+      <div class="st-ctl">
+        <button ${val<=0?"disabled":""} onclick="plentyAdjust('${r}',-1)">−</button>
+        <span class="st-val">${val}</span>
+        <button ${sum>=2?"disabled":""} onclick="plentyAdjust('${r}',1)">+</button>
+      </div></div>`;
+  }).join("")+`</div>`;
+  return `
+    <div class="trade-head"><h2>Year of Plenty</h2><span class="trade-who">${PLAYER_NAMES[S.cur]}</span></div>
+    <p class="trade-intro">Take any 2 resource cards from the bank. Chosen ${sum} / 2.</p>
+    <div class="trade-block"><div class="tb-lab">Take from the bank</div>${steppers}</div>
+    <div class="trade-foot">
+      <button class="btn cancel" onclick="devGoto('menu')">Back</button>
+      <button class="btn primary" ${sum===2?"":"disabled"} onclick="confirmPlenty()">Take 2</button>
+    </div>`;
+}
+function plentyAdjust(r,delta){
+  const sum=RES_ORDER.reduce((s,x)=>s+DEV.pick[x],0);
+  if(delta>0&&sum>=2) return;
+  DEV.pick[r]=Math.max(0,DEV.pick[r]+delta);
+  renderDev();
+}
+function confirmPlenty(){
+  const p=S.cur, sum=RES_ORDER.reduce((s,r)=>s+DEV.pick[r],0);
+  if(sum!==2||S.players[p].dev.plenty<=0||!canPlayDevNow()) return;
+  S.players[p].dev.plenty--; S.playedDevThisTurn=true;
+  RES_ORDER.forEach(r=>{ S.players[p].resources[r]+=DEV.pick[r]; });
+  pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(DEV.pick)+".",true);
+  recomputeVP(); checkWin(); closeDev(); renderAll();
+}
+
+function monoHTML(){
+  const cells=RES_ORDER.map(r=>resCellHTML(r,DEV.res===r,false,"",`monoPick('${r}')`)).join("");
+  return `
+    <div class="trade-head"><h2>Monopoly</h2><span class="trade-who">${PLAYER_NAMES[S.cur]}</span></div>
+    <p class="trade-intro">Name one resource — every other player hands you all of theirs.</p>
+    <div class="trade-block"><div class="tb-lab">Claim every</div><div class="res-grid">${cells}</div></div>
+    <div class="trade-foot">
+      <button class="btn cancel" onclick="devGoto('menu')">Back</button>
+      <button class="btn primary" ${DEV.res?"":"disabled"} onclick="confirmMono()">Claim all</button>
+    </div>`;
+}
+function monoPick(r){ DEV.res=r; renderDev(); }
+function confirmMono(){
+  const p=S.cur, r=DEV.res;
+  if(!r||S.players[p].dev.mono<=0||!canPlayDevNow()) return;
+  S.players[p].dev.mono--; S.playedDevThisTurn=true;
+  let taken=0;
+  S.players.forEach(pl=>{ if(pl.i===p) return; taken+=pl.resources[r]; S.players[p].resources[r]+=pl.resources[r]; pl.resources[r]=0; });
+  pushLog(PLAYER_NAMES[p]+" plays Monopoly and collects "+taken+" "+RES_SHORT[r].toLowerCase()+".",true);
+  recomputeVP(); checkWin(); closeDev(); renderAll();
+}
 
 /* ================= RENDERING ================= */
 const layers={};
@@ -898,13 +1180,21 @@ function renderPlayers(){
       const txt=Object.keys(counts).map(k=>k+(counts[k]>1?" ×"+counts[k]:"")).join(" · ");
       hbHtml=`<div class="harbour-line" title="Harbours this player can trade at">⚓ ${txt}</div>`;
     }
+    const badges=(S.largestArmy===pl.i?`<span class="badge" title="Largest Army (+2 VP)">⚔ Army</span>`:"")
+      +(S.longestRoad===pl.i?`<span class="badge" title="Longest Road (+2 VP)">⚑ Road</span>`:"");
+    const stats=`<div class="pstats">
+      <span>🃏 <b>${totalCards(pl.i)}</b> cards</span>
+      <span>⚑ road <b>${pl.roadLen}</b></span>
+      <span>◈ <b>${devCount(pl.i)}</b> dev</span>
+      <span>⚔ <b>${pl.knights}</b> knights</span></div>`;
     card.innerHTML=`
       <div class="prow" style="width:100%">
         <span class="swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>
         <span class="pname">${PLAYER_NAMES[pl.i]}</span>
+        ${badges?`<span class="pawards">${badges}</span>`:""}
         <span class="vp">${pl.vp}<small> VP</small></span>
       </div>
-      <div class="pcard-body"><div class="res-chips">${chips}</div>${hbHtml}</div>`;
+      <div class="pcard-body"><div class="res-chips">${chips}</div>${stats}${hbHtml}</div>`;
     box.appendChild(card);
   });
 }
@@ -920,7 +1210,9 @@ function renderPrompt(){
   } else {
     const who=PLAYER_NAMES[S.cur];
     if(S.pendingRobber) t=`<strong>${who}</strong> rolled a 7 — tap a hex to move the robber.`;
+    else if(S.mode==="robber") t=`<strong>${who}</strong> played a Knight — tap a hex to move the robber.`;
     else if(S.mode==="settlement") t="Tap a glowing intersection to build your settlement.";
+    else if(S.mode==="road"&&S.freeRoads>0) t=`Road Building — place ${S.freeRoads} free road${S.freeRoads>1?"s":""}.`;
     else if(S.mode==="road") t="Tap a glowing slot to build your road.";
     else if(S.mode==="city") t="Tap one of your settlements to upgrade it to a city.";
     else if(!S.hasRolled) t=`<strong>${who}'s</strong> turn — roll the dice to begin.`;
@@ -943,14 +1235,18 @@ function renderActions(){
   }
   if(S.phase==="over"){ mk("Play again","primary span2",()=>{renderSetup();$("overlay").classList.remove("hidden");}); return; }
 
-  const canAct=S.hasRolled&&!S.pendingRobber;
+  const canAct=S.hasRolled&&!S.pendingRobber&&S.mode!=="robber"&&S.freeRoads===0;
   mk("Roll dice","primary span2",rollDice,S.hasRolled||S.pendingRobber);
   mk("Build road","",()=>tryMode("road"),!canAct,"1 wood · 1 brick");
   mk("Build settlement","",()=>tryMode("settlement"),!canAct,"wood·brick·sheep·wheat");
   mk("Build city","",()=>tryMode("city"),!canAct,"3 ore · 2 wheat");
   mk("Trade","",openTrade,!canAct,"bank · harbour · player");
+  mk("Buy dev card","",buyDev,!canAct||S.devDeck.length===0||!canAfford(S.cur,COST.dev),"1 ore · 1 wheat · 1 sheep");
+  const dh=S.players[S.cur].dev, playable=dh.knight+dh.road+dh.plenty+dh.mono;
+  mk("Play dev card","",openPlayDev,!canAct||S.playedDevThisTurn||!hasPlayableDev(S.cur),
+    S.playedDevThisTurn?"1 already played":(playable?playable+" playable":"none playable"));
   mk("End turn","span2",endTurn,!canAct);
-  if(S.mode&&S.mode!=="robber") mk("Cancel placement","cancel span2",cancelMode);
+  if(S.mode&&S.mode!=="robber") mk((S.freeRoads>0?"Skip remaining road"+(S.freeRoads>1?"s":""):"Cancel placement"),"cancel span2",cancelMode);
 }
 function renderLog(){
   const box=$("log"); box.innerHTML="";
@@ -967,7 +1263,7 @@ let TRADE=null;
 const zeroRes=()=>({wood:0,brick:0,sheep:0,wheat:0,ore:0});
 
 function openTrade(){
-  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber) return;
+  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber||S.mode==="robber"||S.freeRoads>0) return;
   S.mode=null;                       // clear any pending build placement
   TRADE={screen:"menu"};
   $("tradeOverlay").classList.remove("hidden");
