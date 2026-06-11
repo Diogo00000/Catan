@@ -131,6 +131,28 @@
   .btn.span2{grid-column:span 2;}
   .btn .cost{display:block; font-weight:400; font-size:9px; letter-spacing:.3px; opacity:.85; margin-top:1px;}
   .btn.cancel{background:transparent; color:#9c3b30; border-color:#9c3b30;}
+  .bot-tip{background:transparent; border:0; color:var(--ink-soft); font-weight:500; cursor:default; font-size:12px;
+    text-align:center; padding:4px 0;}
+
+  /* Auto-play bar */
+  #autoSection{display:none;}
+  .autobar{display:flex; flex-wrap:wrap; align-items:center; gap:8px;}
+  .seg-group{display:inline-flex; border:1px solid rgba(107,79,46,.35); border-radius:8px; overflow:hidden;}
+  .seg{font-family:'Outfit',sans-serif; font-size:11px; cursor:pointer; background:rgba(255,255,255,.30);
+    border:0; padding:6px 11px; color:var(--ink); border-right:1px solid rgba(107,79,46,.22);}
+  .seg:last-child{border-right:0;}
+  .seg:hover:not(.sel){background:rgba(107,79,46,.10);}
+  .seg.sel{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); font-weight:700;}
+  #pauseBtn{border:1px solid rgba(107,79,46,.35); border-radius:8px;}
+  .spd-lab{font-size:9px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-soft);}
+  .auto-status{flex:1 1 100%; font-size:10.5px; color:var(--ink-soft); font-style:italic;}
+  .seat-type{font-family:'Outfit',sans-serif; font-size:11px; font-weight:600; cursor:pointer; flex:0 0 auto;
+    border:1px solid rgba(107,79,46,.35); border-radius:8px; padding:7px 8px; background:rgba(255,255,255,.35);
+    color:var(--ink); white-space:nowrap;}
+  .seat-type:hover{background:rgba(107,79,46,.12);}
+  .seat-type.bot{background:rgba(47,116,181,.18); border-color:#2f74b5;}
+  .watch-row{display:flex; align-items:center; gap:8px; margin:2px 0 14px; font-size:12.5px; color:var(--ink); cursor:pointer;}
+  .watch-row input{width:16px; height:16px; cursor:pointer;}
 
   /* Log */
   .log{font-size:11.5px; line-height:1.6; color:var(--ink-soft); max-height:108px; overflow-y:auto;}
@@ -258,6 +280,24 @@
       </div>
     </div>
 
+    <div class="section" id="autoSection">
+      <div class="autobar">
+        <span class="spd-lab">Mode</span>
+        <div class="seg-group">
+          <button class="seg" id="modeManual">Manual</button>
+          <button class="seg" id="modeAuto">Auto · watch</button>
+        </div>
+        <button class="seg" id="pauseBtn">Pause</button>
+        <span class="spd-lab">Speed</span>
+        <div class="seg-group" id="spdGroup">
+          <button class="seg spd" data-ms="1100">Slow</button>
+          <button class="seg spd" data-ms="550">Normal</button>
+          <button class="seg spd" data-ms="220">Fast</button>
+        </div>
+        <div class="auto-status" id="autoStatus"></div>
+      </div>
+    </div>
+
     <div class="section">
       <div class="players" id="players"></div>
     </div>
@@ -285,6 +325,7 @@
         <div class="count-btns" id="countBtns"></div>
       </div>
       <div class="seats" id="seats"></div>
+      <label class="watch-row"><input type="checkbox" id="watchStart"><span>Auto-watch mode — let every seat play itself while I watch</span></label>
       <button class="btn primary span2" id="startBtn" onclick="startGame()">Start game</button>
     </div>
   </div>
@@ -441,7 +482,7 @@ const $=id=>document.getElementById(id);
 /* ---------------- Pre-game setup screen ---------------- */
 const setupState={count:4, players:[]};
 function firstFreeColor(taken){ return (PALETTE.find(c=>!taken.includes(c.hex))||PALETTE[0]).hex; }
-function defaultSeat(taken,i){ return {name:"Player "+(i+1), color:firstFreeColor(taken)}; }
+function defaultSeat(taken,i){ return {name:"Player "+(i+1), color:firstFreeColor(taken), type:"human"}; }
 function ensureSeats(){
   const ps=setupState.players;
   while(ps.length<setupState.count) ps.push(defaultSeat(ps.map(p=>p.color),ps.length));
@@ -491,7 +532,13 @@ function renderSetup(){
       sw.addEventListener("click",()=>{ seat.color=c.hex; renderSetup(); });
       sws.appendChild(sw);
     });
-    row.appendChild(num); row.appendChild(inp); row.appendChild(sws);
+    const tbtn=document.createElement("button");
+    tbtn.type="button";
+    tbtn.className="seat-type"+(seat.type==="bot"?" bot":"");
+    tbtn.textContent=seat.type==="bot"?"🤖 Bot":"🧑 Human";
+    tbtn.title="Toggle human / computer player";
+    tbtn.addEventListener("click",()=>{ seat.type=(seat.type==="bot")?"human":"bot"; renderSetup(); });
+    row.appendChild(num); row.appendChild(inp); row.appendChild(sws); row.appendChild(tbtn);
     seats.appendChild(row);
   });
   refreshStartBtn();
@@ -503,6 +550,10 @@ function startGame(){
   const n=seats.length;
   PLAYER_NAMES=seats.map(s=>s.name.trim());
   PLAYER_COLORS=seats.map(s=>s.color);
+  PLAYER_TYPES=seats.map(s=>s.type||"human");
+  watchMode=!!($("watchStart")&&$("watchStart").checked);
+  watchPendingOff=false; paused=false; clearTimeout(botTimer);
+  $("autoSection").style.display="block";
   COUNTS=(n>=5)?COUNTS_LARGE:COUNTS_SMALL;   // larger board for 5-6 players
   buildGeometry();
   const robberHex=assignTiles();
@@ -530,6 +581,7 @@ function startGame(){
     freeRoadsLeft:0,
     largestArmy:null,      // player index holding Largest Army (+2 VP)
     longestRoad:null,      // player index holding Longest Road (+2 VP)
+    _stallSum:0, _stallTurns:0,   // stalemate detection for auto-play
     log:[]
   };
   // snake setup order
@@ -658,6 +710,7 @@ function legalCities(p){
 
 /* ---------------- Setup phase ---------------- */
 function beginSetupTurn(){
+  applyPendingMode();
   S.cur=S.setupQueue[S.setupIdx];
   S.mode="setupSettlement"; S.lastSetupV=null;
   renderAll();
@@ -689,6 +742,7 @@ function commitRoad(eid){
     if(S.setupIdx<S.setupQueue.length){ beginSetupTurn(); }
     else { // setup complete
       S.phase="play"; S.cur=0; S.hasRolled=false; S.mode=null;
+      applyPendingMode();
       pushLog("Setup complete — let the trading begin!",true);
       renderAll();
     }
@@ -720,6 +774,8 @@ function commitRobber(hi){
   const victims=[...new Set(hexes[hi].corners.map(v=>S.buildings[v]).filter(b=>b&&b.player!==S.cur).map(b=>b.player))];
   if(victims.length<=1){
     finishRobber(victims[0]);           // undefined → nobody to steal from
+  } else if(isBot(S.cur)){
+    finishRobber(botPickStealTarget(victims));   // a bot resolves the choice itself
   } else {
     // More than one rival borders the hex — let the current player pick.
     S.stealChoices=victims; renderAll(); openSteal();
@@ -757,7 +813,7 @@ function rollDice(){
     if(order.length){
       S.discardQueue=order; S.discardIdx=0;
       renderAll();
-      openDiscard();
+      advanceDiscards();
       return;
     }
     S.mode="robber";
@@ -781,7 +837,18 @@ function endTurn(){
   S.players[S.cur].devNew={knight:0,vp:0,road:0,plenty:0,mono:0};
   S.cur=(S.cur+1)%S.nPlayers; S.hasRolled=false; S.mode=null; S.dice=[null,null];
   S.devPlayedThisTurn=false;
+  applyPendingMode();
+  // Stalemate guard: if total VP hasn't risen for many turns, an auto-play game can't progress — end it.
+  const sum=S.players.reduce((s,pl)=>s+pl.vp,0);
+  if(sum>S._stallSum){ S._stallSum=sum; S._stallTurns=0; }
+  else { S._stallTurns++; if(S._stallTurns>=STALL_LIMIT && isBot(S.cur)){ declareStalemate(); } }
   renderAll();
+}
+function declareStalemate(){
+  let w=0,bv=-1;
+  S.players.forEach(p=>{ const v=p.vp*1000+totalCards(p.i); if(v>bv){bv=v;w=p.i;} });
+  S.phase="over"; S.winner=w; S.mode=null; S.pendingRobber=false;
+  pushLog("Stalemate — the board is locked and no one can reach 10. "+PLAYER_NAMES[w]+" wins on points ("+S.players[w].vp+" VP).",true);
 }
 function checkWin(){
   if(S.phase==="over") return;
@@ -944,6 +1011,7 @@ function renderPieces(){
 }
 function renderInteract(){
   layers.interact.innerHTML="";
+  if(isBot(S.cur)) return;            // bots act programmatically — no clickable candidates
   const p=S.cur, m=S.mode;
   if(m==="setupSettlement"||m==="settlement"){
     legalSettlements(p,m==="setupSettlement").forEach(vid=>{
@@ -1061,6 +1129,12 @@ function renderActions(){
   }
   if(S.phase==="over"){ mk("Play again","primary span2",()=>{renderSetup();$("overlay").classList.remove("hidden");}); return; }
 
+  if(isBot(S.cur)){
+    const tip=document.createElement("div"); tip.className="bot-tip"; tip.style.gridColumn="span 2";
+    tip.textContent="🤖 "+PLAYER_NAMES[S.cur]+(paused?" — paused":" is playing…");
+    box.appendChild(tip); return;
+  }
+
   const canAct=canActNow();
   const p=S.cur;
   mk("Roll dice","primary span2",rollDice,S.hasRolled||S.pendingRobber);
@@ -1085,6 +1159,7 @@ function renderLog(){
 function renderAll(){
   renderPieces(); renderInteract();
   renderDice(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
+  renderAutoBar(); scheduleBot();
 }
 
 /* ================= TRADING ================= */
@@ -1314,15 +1389,23 @@ function confirmDiscard(){
   if(selSum!==DISCARD.need) return;
   RES_ORDER.forEach(r=>{ S.players[p].resources[r]-=DISCARD.sel[r]; });
   pushLog(PLAYER_NAMES[p]+" discards "+DISCARD.need+" card"+(DISCARD.need===1?"":"s")+".",true);
-  S.discardIdx++;
-  if(S.discardIdx<S.discardQueue.length){
-    openDiscard();
-  } else {
-    DISCARD=null; $("discardOverlay").classList.add("hidden");
-    S.mode="robber";
-    pushLog(PLAYER_NAMES[S.cur]+" — move the robber.",true);
-    renderAll();
+  DISCARD=null; S.discardIdx++;
+  advanceDiscards();
+}
+/* Walk the discard queue: bots discard automatically, humans get the dialog.
+   When everyone is done, the robber moves. */
+function advanceDiscards(){
+  while(S.discardQueue && S.discardIdx<S.discardQueue.length){
+    const p=S.discardQueue[S.discardIdx];
+    if(totalCards(p)<=7){ S.discardIdx++; continue; }
+    if(isBot(p)){ botDiscard(p); S.discardIdx++; continue; }
+    openDiscard(); return;                     // human: wait for confirmDiscard()
   }
+  S.discardQueue=null; S.discardIdx=0;
+  DISCARD=null; $("discardOverlay").classList.add("hidden");
+  S.mode="robber";
+  pushLog(PLAYER_NAMES[S.cur]+" — move the robber.",true);
+  renderAll();
 }
 
 function openSteal(){ $("stealOverlay").classList.remove("hidden"); renderSteal(); }
@@ -1483,8 +1566,328 @@ function confirmMono(){
   recomputeVP(); renderAll();
 }
 
+/* ================= COMPUTER PLAYERS (BOTS) ================= */
+let PLAYER_TYPES=[];          // per-seat "human" | "bot"
+let watchMode=false;          // global Auto / watch — every seat is bot-controlled
+let watchPendingOff=false;    // user asked to return to Manual at the next turn boundary
+let paused=false;             // freeze auto-play
+let speedMs=550;              // delay between bot actions
+let botTimer=null;
+
+const ROAD_TARGET_MIN=6;      // only build roads toward genuinely good future settlement spots
+const STALL_LIMIT=50;         // turns of zero VP progress before a stalemate is called (auto-play safety)
+const SETTLE_MIN=0;           // don't take 1-hex / 2-&-12 corners except in the opening
+const TRADE_GAP_MAX=2;        // only bank/harbour-trade to finish a build we're this close to
+
+function isBot(p){ return watchMode || PLAYER_TYPES[p]==="bot"; }
+function anyBots(){ return watchMode || PLAYER_TYPES.some(t=>t==="bot"); }
+function applyPendingMode(){          // called at each turn boundary
+  if(watchPendingOff){ watchPendingOff=false; if(watchMode){ watchMode=false; pushLog("Manual control resumed.",true); } }
+}
+function setWatch(on){
+  if(on){
+    watchMode=true; watchPendingOff=false; paused=false;
+    if(S && (S.mode==="settlement"||S.mode==="road"||S.mode==="city")) S.mode=null;   // drop a dangling human placement
+    pushLog("Auto-play on — watching the bots.",true);
+  } else if(watchMode){
+    watchPendingOff=true;             // hand back to humans at the next turn
+  }
+  renderAll();
+}
+function togglePause(){ paused=!paused; renderAll(); }
+function renderAutoBar(){
+  if(!S) return;
+  $("modeAuto").classList.toggle("sel",watchMode);
+  $("modeManual").classList.toggle("sel",!watchMode);
+  $("pauseBtn").textContent=paused?"Resume":"Pause";
+  $("pauseBtn").classList.toggle("sel",paused);
+  document.querySelectorAll(".spd").forEach(b=>b.classList.toggle("sel",+b.dataset.ms===speedMs));
+  let st="";
+  if(paused) st="⏸ Paused.";
+  else if(watchMode) st=watchPendingOff?"Watching — will hand back to Manual next turn.":"Watching — bots control every seat.";
+  else st=anyBots()?"Manual — humans play by hand; bot seats auto-play.":"Manual — all seats are human.";
+  $("autoStatus").textContent=st;
+}
+
+/* ---- scheduler: one visible bot action per tick; always terminates ---- */
+function botActive(){
+  if(!S || S.phase==="over" || paused) return false;
+  if(DISCARD||TRADE||DEV||S.stealChoices) return false;   // a human dialog is resolving
+  if(S.phase==="setup"||S.phase==="play") return isBot(S.cur);
+  return false;
+}
+function scheduleBot(){
+  clearTimeout(botTimer);
+  if(botActive()) botTimer=setTimeout(runBotTick, speedMs);
+}
+function runBotTick(){
+  if(!botActive()) return;
+  try{ botTickOnce(); }
+  catch(err){
+    console.error("Bot error — ending the turn safely.",err);
+    if(S){ S.mode=null; S.pendingRobber=false; S.stealChoices=null; S.discardQueue=null;
+      if(S.phase==="play"){ try{ endTurn(); }catch(e){ S.cur=(S.cur+1)%S.nPlayers; S.hasRolled=false; S.devPlayedThisTurn=false; renderAll(); } } }
+  }
+  scheduleBot();
+}
+function botTickOnce(){
+  if(S.phase==="setup"){ botSetup(); return; }
+  if(S.phase!=="play") return;
+  if(S.mode==="robber"){ botMoveRobber(); return; }
+  if(S.mode==="roadBuild"){ botPlaceFreeRoad(); return; }
+  if(S.pendingRobber) return;                  // waiting on a human discard
+  if(!S.hasRolled){ rollDice(); return; }
+  if(botDoOneBuildOrPlay()) return;
+  endTurn();                                   // nothing useful left — always end
+}
+
+/* ---- placement scoring (used everywhere a bot picks a spot) ---- */
+function pips(n){ return (n==null)?0:6-Math.abs(7-n); }
+function harbourAt(vid){ return harbours.find(h=>h.v1===vid||h.v2===vid)||null; }
+function playerCoverage(p){
+  const res=new Set(), nums=new Set();
+  for(const vid in S.buildings){ const b=S.buildings[vid]; if(b.player!==p) continue;
+    vertices[vid].hexes.forEach(hi=>{const h=hexes[hi]; if(h.resource!=="desert"&&h.number!=null){res.add(h.resource);nums.add(h.number);}}); }
+  return {res,nums};
+}
+function spotScore(vid,p){
+  const prod=vertices[vid].hexes.map(hi=>hexes[hi]).filter(h=>h.resource!=="desert"&&h.number!=null);
+  const k=prod.length;
+  if(k===0) return -100;                                   // pure coast / desert corner
+  let score=prod.reduce((s,h)=>s+pips(h.number),0);        // base = sum of pips
+  if(k>=3) score+=6; else if(k===2) score-=4; else score-=10;          // strongly favour 3-hex spots
+  if(prod.every(h=>h.number===2||h.number===12)) score-=50;            // 2/12-only ≈ worthless
+  prod.forEach(h=>{ if(h.number===6||h.number===8) score+=2; });       // bonus for the best numbers
+  const cov=playerCoverage(p);
+  prod.forEach(h=>{ if(!cov.res.has(h.resource)) score+=2; if(!cov.nums.has(h.number)) score+=1; });  // diversity
+  const hb=harbourAt(vid);
+  if(hb){ if(hb.type==="3:1") score+=1;
+    else score+=(prod.some(h=>h.resource===hb.type)||cov.res.has(hb.type))?3:1; }                     // 2:1 you can feed
+  return score;
+}
+function argmaxVid(list,fn){ let best=null,bv=-1e9; list.forEach(v=>{const s=fn(v); if(s>bv){bv=s;best=v;}}); return best; }
+function botMySettlements(p){ return Object.keys(S.buildings).filter(v=>S.buildings[v].player===p&&S.buildings[v].type==="settlement").map(Number); }
+function botBestSpot(list,p){ return argmaxVid(list,v=>spotScore(v,p)); }
+
+/* ---- opening placement ---- */
+function botSetup(){
+  const p=S.cur;
+  if(S.mode==="setupSettlement"){
+    const cands=legalSettlements(p,true);
+    const vid=argmaxVid(cands,v=>spotScore(v,p));
+    commitSettlement(vid==null?cands[0]:vid);
+  } else if(S.mode==="setupRoad"){
+    commitRoad(botPickSetupRoad(p,S.lastSetupV));
+  }
+}
+function botPickSetupRoad(p,anchor){
+  const legal=legalRoads(p,true,anchor);
+  if(legal.length===0) return null;
+  let best=legal[0],bv=-1e9;
+  legal.forEach(eid=>{
+    const e=edges[eid], far=(e.v1===anchor)?e.v2:e.v1;
+    let s=spotScore(far,p), look=-1e9;
+    vertices[far].adj.forEach(nb=>{ if(nb!==anchor && !S.buildings[nb]) look=Math.max(look,spotScore(nb,p)); });
+    s+=Math.max(0,look)*0.5;                       // also value where it lets us reach next
+    if(s>bv){bv=s;best=eid;}
+  });
+  return best;
+}
+
+/* ---- robber / steal / discard ---- */
+function leaderOf(exclude){
+  let best=-1,bv=-1;
+  S.players.forEach(pl=>{ if(pl.i===exclude) return; const v=pl.vp*100+totalCards(pl.i); if(v>bv){bv=v;best=pl.i;} });
+  return best;
+}
+function botPickStealTarget(victims){
+  const leader=leaderOf(S.cur);
+  let best=victims[0],bv=-1;
+  victims.forEach(v=>{ const s=totalCards(v)+(v===leader?100:0); if(s>bv){bv=s;best=v;} });
+  return best;
+}
+function botRobberHasTarget(p){
+  return hexes.some((h,hi)=> hi!==S.robberHex
+    && !h.corners.some(v=>S.buildings[v]&&S.buildings[v].player===p)
+    && h.corners.some(v=>S.buildings[v]&&S.buildings[v].player!==p));
+}
+function botMoveRobber(){
+  const me=S.cur, leader=leaderOf(me);
+  const touchesSelf=hi=>hexes[hi].corners.some(v=>S.buildings[v]&&S.buildings[v].player===me);
+  let best=null,bestScore=-1;
+  hexes.forEach((h,hi)=>{
+    if(hi===S.robberHex||touchesSelf(hi)) return;
+    let sc=0, opp=false;
+    h.corners.forEach(v=>{const b=S.buildings[v]; if(b&&b.player!==me){ opp=true; sc+=(b.type==="city"?2:1)*pips(h.number); if(b.player===leader) sc+=10; }});
+    if(!opp) return;
+    if(sc>bestScore){bestScore=sc;best=hi;}
+  });
+  if(best==null){                                  // fallback: any hex not on our own land
+    for(let hi=0;hi<hexes.length;hi++){ if(hi!==S.robberHex&&!touchesSelf(hi)){ best=hi; break; } }
+    if(best==null) best=(S.robberHex+1)%hexes.length;
+  }
+  commitRobber(best);
+}
+function botDiscard(p){
+  const need=Math.floor(totalCards(p)/2);
+  const keepW={wheat:3,ore:3,brick:2,wood:2,sheep:1};   // hang on to city/build resources, dump sheep first
+  for(let i=0;i<need;i++){
+    let pick=null,best=-1e9;
+    RES_ORDER.forEach(r=>{ if(S.players[p].resources[r]>0){ const v=S.players[p].resources[r]*2-keepW[r]; if(v>best){best=v;pick=r;} }});
+    if(pick) S.players[p].resources[pick]--;
+  }
+  pushLog(PLAYER_NAMES[p]+" discards "+need+" card"+(need===1?"":"s")+".",true);
+}
+
+/* ---- build / trade / dev priority ---- */
+function botDoOneBuildOrPlay(){
+  const p=S.cur;
+  if(!S.devPlayedThisTurn && botMaybePlayDev()) return true;
+  // 1. claim a new settlement on the best legal spot (board space is contested — grab it first)
+  if(ownCount(p,"settlement")<LIMIT.settlement){
+    const spots=legalSettlements(p,false).filter(v=>spotScore(v,p)>=SETTLE_MIN);
+    if(spots.length){
+      if(canAfford(p,COST.settlement)){ commitSettlement(botBestSpot(spots,p)); return true; }
+      if(botTradeFor(COST.settlement)) return true;
+    }
+  }
+  // 2. upgrade the best settlement to a city
+  if(ownCount(p,"city")<LIMIT.city){
+    const setts=botMySettlements(p);
+    if(setts.length){
+      if(canAfford(p,COST.city)){ commitCity(botBestSpot(setts,p)); return true; }
+      if(botTradeFor(COST.city)) return true;
+    }
+  }
+  // 3. build a road toward the best reachable open spot
+  if(ownCount(p,"road")<LIMIT.road){
+    const eid=botBestRoad(p);
+    if(eid!=null){
+      if(canAfford(p,COST.road)){ commitRoad(eid); return true; }
+      if(botTradeFor(COST.road)) return true;
+    }
+  }
+  // 4. spend the spare on a development card
+  if(S.deck.length>0 && canAfford(p,COST.dev)){ buyDev(); return true; }
+  return false;
+}
+function botBestRoad(p){
+  if(ownCount(p,"road")>=LIMIT.road) return null;
+  const dist=new Array(vertices.length).fill(Infinity);
+  const firstEdge=new Array(vertices.length).fill(-1);
+  const q=[];
+  const inNet=v=>{ const b=S.buildings[v]; if(b&&b.player===p) return true; return vertices[v].edges.some(e=>S.roads[e]===p); };
+  vertices.forEach(v=>{ if(inNet(v.id)){ dist[v.id]=0; q.push(v.id); } });
+  for(let head=0;head<q.length;head++){            // multi-source BFS over still-empty edges
+    const v=q[head], b=S.buildings[v];
+    if(b&&b.player!==p) continue;                  // can't extend through an opponent's building
+    vertices[v].edges.forEach(eid=>{
+      if(S.roads[eid]!==undefined) return;         // edge already has a road
+      const e=edges[eid], u=(e.v1===v)?e.v2:e.v1;
+      if(dist[u]>dist[v]+1){
+        dist[u]=dist[v]+1;
+        firstEdge[u]=(dist[v]===0)?eid:firstEdge[v];
+        q.push(u);
+      }
+    });
+  }
+  let bestV=-1,bestVal=-1e9;
+  vertices.forEach(v=>{
+    const id=v.id;
+    if(dist[id]<1||dist[id]>4||!isFinite(dist[id])) return;
+    if(S.buildings[id]||!v.adj.every(nb=>!S.buildings[nb])) return;     // occupied or distance-rule blocked
+    const sc=spotScore(id,p);
+    if(sc<ROAD_TARGET_MIN) return;
+    const val=sc-dist[id]*3;                        // prefer high value, nearby
+    if(val>bestVal){bestVal=val;bestV=id;}
+  });
+  if(bestV>=0){ const fe=firstEdge[bestV]; if(fe>=0 && S.roads[fe]===undefined) return fe; }
+  return null;
+}
+function botPlaceFreeRoad(){
+  let eid=botBestRoad(S.cur);
+  if(eid==null){
+    const legal=legalRoads(S.cur,false,null);
+    if(legal.length===0){ S.mode=null; S.freeRoadsLeft=0; renderAll(); return; }
+    eid=legal[0];
+  }
+  commitRoad(eid);                                 // handles freeRoadsLeft and exiting the mode
+}
+function botTradeFor(cost){
+  const p=S.cur, need={}; let totalNeed=0;
+  Object.keys(cost).forEach(r=>{ const d=cost[r]-S.players[p].resources[r]; if(d>0){need[r]=d; totalNeed+=d;} });
+  if(totalNeed===0||totalNeed>TRADE_GAP_MAX) return false;
+  let give=null,rate=99;
+  RES_ORDER.forEach(r=>{ if(need[r]) return; const rt=harbourRate(p,r), surplus=S.players[p].resources[r]-(cost[r]||0);
+    if(surplus>=rt && rt<rate){ rate=rt; give=r; } });
+  if(give==null) return false;
+  const recv=Object.keys(need)[0];
+  S.players[p].resources[give]-=rate; S.players[p].resources[recv]+=1;
+  pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[give].toLowerCase()+" for 1 "+RES_SHORT[recv].toLowerCase()+(rate<4?" at a harbour.":" with the bank."),true);
+  return true;
+}
+function botMaybePlayDev(){
+  const p=S.cur, d=S.players[p].dev, nw=S.players[p].devNew;
+  const have=t=>(d[t]-nw[t])>0;
+  if(have("knight")){
+    const leader=leaderOf(p);
+    const robberOnMe=hexes[S.robberHex].corners.some(v=>S.buildings[v]&&S.buildings[v].player===p);
+    const leaderAhead=leader>=0 && S.players[leader].vp>=S.players[p].vp;
+    const nextK=S.players[p].playedKnights+1;
+    const chaseArmy=nextK>=3 && (S.largestArmy==null || (S.largestArmy!==p && nextK>S.players[S.largestArmy].playedKnights));
+    if(botRobberHasTarget(p) && (robberOnMe||leaderAhead||chaseArmy)){ devPlayKnight(); return true; }
+  }
+  if(have("mono")){
+    const best=botMonopolyBest(p);
+    if(best && best.total>=4){ playBotMonopoly(best.res); return true; }
+  }
+  if(have("plenty")){
+    const pick=botPlentyPick(p);
+    if(pick){ playBotPlenty(pick); return true; }
+  }
+  if(have("road") && ownCount(p,"road")<LIMIT.road && botBestRoad(p)!=null){ devPlayRoad(); return true; }
+  return false;
+}
+function botMonopolyBest(p){
+  let best=null;
+  RES_ORDER.forEach(r=>{ let t=0; for(let i=0;i<S.nPlayers;i++){ if(i!==p) t+=S.players[i].resources[r]; }
+    if(!best||t>best.total) best={res:r,total:t}; });
+  return best;
+}
+function botPlentyPick(p){
+  const targets=[];
+  if(ownCount(p,"city")<LIMIT.city && botMySettlements(p).length) targets.push(COST.city);
+  if(ownCount(p,"settlement")<LIMIT.settlement && legalSettlements(p,false).some(v=>spotScore(v,p)>=SETTLE_MIN)) targets.push(COST.settlement);
+  if(ownCount(p,"road")<LIMIT.road && botBestRoad(p)!=null) targets.push(COST.road);
+  for(const cost of targets){
+    const need=[]; Object.keys(cost).forEach(r=>{ let dlt=cost[r]-S.players[p].resources[r]; while(dlt-->0) need.push(r); });
+    if(need.length>=1 && need.length<=2){ while(need.length<2) need.push("ore"); return need.slice(0,2); }
+  }
+  return null;
+}
+function playBotPlenty(two){
+  const p=S.cur;
+  two.forEach(r=>S.players[p].resources[r]++);
+  S.players[p].dev.plenty--; S.devPlayedThisTurn=true;
+  const tally=zeroRes(); two.forEach(r=>tally[r]++);
+  pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(tally)+".",true);
+  recomputeVP(); renderAll();
+}
+function playBotMonopoly(res){
+  const p=S.cur; let total=0;
+  for(let i=0;i<S.nPlayers;i++){ if(i===p) continue; total+=S.players[i].resources[res]; S.players[i].resources[res]=0; }
+  S.players[p].resources[res]+=total;
+  S.players[p].dev.mono--; S.devPlayedThisTurn=true;
+  pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[res].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
+  recomputeVP(); renderAll();
+}
+
 /* ---------------- Init ---------------- */
-$("newGameBtn").addEventListener("click",()=>{renderSetup();$("overlay").classList.remove("hidden");});
+$("newGameBtn").addEventListener("click",()=>{clearTimeout(botTimer);renderSetup();$("overlay").classList.remove("hidden");});
+$("modeManual").addEventListener("click",()=>setWatch(false));
+$("modeAuto").addEventListener("click",()=>setWatch(true));
+$("pauseBtn").addEventListener("click",togglePause);
+document.querySelectorAll(".spd").forEach(b=>b.addEventListener("click",()=>{ speedMs=+b.dataset.ms; renderAutoBar(); scheduleBot(); }));
 buildGeometry();
 // draw an idle board behind the start overlay
 assignTiles();
