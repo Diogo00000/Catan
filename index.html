@@ -928,56 +928,32 @@ function drawStaticBoard(){
 
   drawTokens();
 }
-/* Harbours: a little wooden boat moored out in the water, with two docks
-   reaching back to the harbour's two coastal building spots. Specific (2:1)
-   harbours stripe their docks + sign in the resource's tile colour; generic
-   (3:1) harbours use plain wood and show "3:1 ?". Drawn beneath the pieces. */
 function drawHarbours(g){
-  const clamp=(v,lo,hi)=>v<lo?lo:(v>hi?hi:v);
   harbours.forEach(h=>{
     const a=vertices[h.v1], b=vertices[h.v2];
     const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
-    let dx=mx-CX0, dy=my-CY0; const d=Math.hypot(dx,dy)||1; dx/=d; dy/=d; // outward unit (away from board centre)
-    // boat sits ~30px off the coast, clamped into a safe inset so the mast never clips the viewport
-    const bx=clamp(mx+dx*30, 24, 576), by=clamp(my+dy*30, 24, 566);
-    const ang=Math.atan2(dy,dx)*180/Math.PI;        // outward angle; mast will point this way
-    const px=-dy, py=dx;                              // tangential (perpendicular) unit
+    let dx=mx-CX0, dy=my-CY0; const d=Math.hypot(dx,dy)||1; dx/=d; dy/=d;
+    const lx=mx+dx*23, ly=my+dy*23;                 // badge sits just off the coast in the water
     const spec=(h.type!=="3:1");
-    const resCol=spec?TILE_COLORS[h.type]:null;
-
-    // --- two docks: thick wooden planks, with a bold resource-colour stripe for 2:1 ---
-    [a,b].forEach(v=>{
-      el("line",{x1:bx,y1:by,x2:v.x,y2:v.y,stroke:"#3a2a18",["stroke-width"]:8,["stroke-linecap"]:"round"},g);   // plank shadow
-      el("line",{x1:bx,y1:by,x2:v.x,y2:v.y,stroke:"#8a6a3e",["stroke-width"]:5.5,["stroke-linecap"]:"round"},g); // plank
-      el("line",{x1:bx,y1:by,x2:v.x,y2:v.y,stroke:"#a9854f",["stroke-width"]:2,["stroke-linecap"]:"round",opacity:.6},g); // grain highlight
-      if(resCol) el("line",{x1:bx,y1:by,x2:v.x,y2:v.y,stroke:resCol,["stroke-width"]:3,["stroke-linecap"]:"round"},g); // resource stripe
-    });
-
-    // --- boat: hull + short mast + cream sail, rotated so the mast points outward ---
-    const boat=el("g",{transform:`translate(${bx},${by}) rotate(${ang+90})`},g);
-    el("ellipse",{cx:0,cy:9,rx:18,ry:5,fill:"rgba(0,0,0,.20)"},boat);          // water shadow
-    el("path",{d:"M-18,-2 L18,-2 L13,9 Q0,13 -13,9 Z",fill:"#7a5230",
-      stroke:"#4a3018",["stroke-width"]:1.5,["stroke-linejoin"]:"round"},boat); // hull
-    el("line",{x1:-15,y1:0.5,x2:15,y2:0.5,stroke:"#5a3d22",["stroke-width"]:1.6},boat); // deck plank
-    el("line",{x1:0,y1:-3,x2:0,y2:-20,stroke:"#5a3d22",["stroke-width"]:2.6,["stroke-linecap"]:"round"},boat); // mast
-    el("path",{d:"M1,-19 Q12,-12 1.5,-4 Z",fill:"#f1e6c8",stroke:"#cbb98c",
-      ["stroke-width"]:1,["stroke-linejoin"]:"round"},boat);                    // sail
-    el("circle",{cx:0,cy:-20,r:1.6,fill:"#caa86a",stroke:"#4a3018",["stroke-width"]:0.6},boat); // masthead
-
-    // --- wooden sign/pill near the boat showing the rate ---
-    const sx=clamp(bx+px*22, 16, 584), sy=clamp(by+py*22, 16, 574);
-    const pw=spec?28:30, ph=15;
-    el("rect",{x:sx-pw/2,y:sy-ph/2,width:pw,height:ph,rx:7,fill:"#cdab73",
-      stroke:spec?resCol:"#6b4f2e",["stroke-width"]:spec?2.4:1.8},g);
-    el("text",{x:spec?sx+3:sx-3,y:sy,["text-anchor"]:"middle",["dominant-baseline"]:"central",
-      ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:9,fill:"#2c2117"},g
-      ).textContent=spec?"2:1":"3:1";
+    const fill=spec?TILE_COLORS[h.type]:"#caa86a";
+    const dark=(h.type==="sheep"||h.type==="wheat"||h.type==="3:1"); // text colour for legibility
+    // dock ropes from the two coastal vertices to the badge
+    [a,b].forEach(v=>el("line",{x1:v.x,y1:v.y,x2:lx,y2:ly,stroke:"rgba(58,42,26,.5)",
+      ["stroke-width"]:2.2,["stroke-linecap"]:"round"},g));
+    el("circle",{cx:a.x,cy:a.y,r:3.4,fill:"#3a2a1a"},g);
+    el("circle",{cx:b.x,cy:b.y,r:3.4,fill:"#3a2a1a"},g);
+    // badge
+    const bw=spec?34:26, bh=spec?19:16;
+    el("rect",{x:lx-bw/2,y:ly-bh/2,width:bw,height:bh,rx:5,fill,stroke:"#3a2a1a",
+      ["stroke-width"]:1.4},g);
+    const rate=el("text",{x:lx,y:spec?ly-3:ly,["text-anchor"]:"middle",["dominant-baseline"]:"central",
+      ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:9.5,
+      fill:dark?"#2c2117":"#fff"},g);
+    rate.textContent=spec?"2:1":"3:1";
     if(spec){
-      el("circle",{cx:sx-pw/2+6,cy:sy,r:3.4,fill:resCol,stroke:"#2c2117",["stroke-width"]:0.8},g); // resource accent
-    }else{
-      el("text",{x:sx+pw/2-6,y:sy,["text-anchor"]:"middle",["dominant-baseline"]:"central",
-        ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:9,fill:"#6b4f2e"},g
-        ).textContent="?";
+      el("text",{x:lx,y:ly+6,["text-anchor"]:"middle",["dominant-baseline"]:"central",
+        ["font-family"]:"'Outfit',sans-serif",["font-weight"]:600,["font-size"]:6,
+        ["letter-spacing"]:"0.4px",fill:dark?"#2c2117":"#fff"},g).textContent=RES_SHORT[h.type].toUpperCase();
     }
   });
 }
