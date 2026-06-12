@@ -106,6 +106,28 @@
   .prod-table .num.zero{color:var(--ink-soft); font-weight:400; opacity:.5;}
   .prod-who{display:inline-flex; align-items:center; gap:7px; font-weight:600; color:var(--ink);}
   .prod-who .swatch{width:14px; height:14px; border-radius:4px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
+  /* Per-player stat cards */
+  .pstat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(232px,1fr)); gap:12px;}
+  .pstat-card{border:1px solid rgba(107,79,46,.22); border-radius:10px; padding:12px 13px 13px;
+    background:rgba(255,255,255,.32);}
+  .pstat-head{display:flex; align-items:center; gap:8px; padding-bottom:9px; margin-bottom:9px;
+    border-bottom:1px solid rgba(107,79,46,.20);}
+  .pstat-head .swatch{width:16px; height:16px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
+  .pstat-name{font-weight:600; font-size:13.5px; color:var(--ink);}
+  .pstat-vp{margin-left:auto; font-family:'Cinzel',serif; font-weight:700; font-size:15px; color:var(--wood-dark);
+    background:rgba(107,79,46,.12); border-radius:20px; padding:2px 11px;}
+  .pstat-vp small{font-family:'Outfit',sans-serif; font-weight:500; font-size:9px; letter-spacing:.5px;}
+  .pstat-sec{margin-top:10px;}
+  .pstat-sec:first-child{margin-top:0;}
+  .pstat-sl{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
+    font-weight:700; margin-bottom:5px;}
+  .pstat-rows{display:flex; flex-direction:column; gap:3px;}
+  .pstat-row{display:flex; align-items:baseline; gap:8px; font-size:11px; color:var(--ink-soft);}
+  .pstat-row .pr-k{flex:1 1 auto;}
+  .pstat-row .pr-v{font-family:'Cinzel',serif; font-weight:700; font-size:12px; color:var(--wood-dark); white-space:nowrap;}
+  .pstat-row .pr-v.muted{color:var(--ink-soft); font-weight:400; opacity:.55;}
+  .pstat-row .pr-v.lucky{color:#3f7d3a;} .pstat-row .pr-v.unlucky{color:#9c3b30;}
+  .pstat-award{font-size:7.5px;}
 
   /* ---------- Panel ---------- */
   .panel{
@@ -671,7 +693,15 @@ function startGame(){
     players:Array.from({length:n},(_,i)=>({i,resources:{wood:0,brick:0,sheep:0,wheat:0,ore:0},vp:0,
       dev:{knight:0,vp:0,road:0,plenty:0,mono:0},      // development cards currently held
       devNew:{knight:0,vp:0,road:0,plenty:0,mono:0},   // of those, bought this turn (not yet playable)
-      playedKnights:0, roadLen:0})),
+      playedKnights:0, roadLen:0,
+      // ---- lifetime per-player stats (all live) ----
+      devBought:0, devPlayed:0,           // dev cards bought / actually played over the game
+      lifetimeRes:0,                      // every resource card ever gained, from any source
+      expProd:0,                          // cumulative expected production (pips/36 summed each roll)
+      robberMoves:0,                      // times this player moved the robber (7 or Knight)
+      cardsStolen:0, cardsStolenFrom:0,   // cards robbed from others / times robbed by others
+      tradesBank:0, tradesHarbour:0, tradesPlayer:0,   // trades made, by kind
+      discardsLost:0})),                  // cards discarded on 7s
     buildings:{},          // vertexId -> {player,type}
     roads:{},              // edgeId -> player
     robberHex,
@@ -835,7 +865,7 @@ function commitSettlement(vid){
     S.settlementsPlaced[S.cur]++;
     if(S.settlementsPlaced[S.cur]===2){ // second settlement yields starting resources
       const got=[];
-      vertices[vid].hexes.forEach(hi=>{const h=hexes[hi];if(h.resource!=="desert"){S.players[S.cur].resources[h.resource]++;S.bank[h.resource]--;got.push(RES_SHORT[h.resource]);}});
+      vertices[vid].hexes.forEach(hi=>{const h=hexes[hi];if(h.resource!=="desert"){S.players[S.cur].resources[h.resource]++;S.bank[h.resource]--;S.players[S.cur].lifetimeRes++;got.push(RES_SHORT[h.resource]);}});
       if(got.length) pushLog(PLAYER_NAMES[S.cur]+" collects "+got.join(", ")+" from the second settlement.");
     }
     S.lastSetupV=vid; S.mode="setupRoad";
@@ -888,6 +918,7 @@ function commitCity(vid){
 }
 function commitRobber(hi){
   S.robberHex=hi; S.mode=null;
+  S.players[S.cur].robberMoves++;          // live stats: a robber move (from a 7 or a Knight)
   // Opponents with a settlement or city touching the new hex are eligible to be robbed.
   const victims=[...new Set(hexes[hi].corners.map(v=>S.buildings[v]).filter(b=>b&&b.player!==S.cur).map(b=>b.player))];
   if(victims.length<=1){
@@ -910,6 +941,8 @@ function finishRobber(victim){
     } else {
       const r=pool[Math.floor(Math.random()*pool.length)];
       S.players[victim].resources[r]--; S.players[S.cur].resources[r]++;
+      S.players[S.cur].lifetimeRes++;                  // a stolen card is a card gained
+      S.players[S.cur].cardsStolen++; S.players[victim].cardsStolenFrom++;
       pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[victim]+".",true);
     }
   }
@@ -924,6 +957,8 @@ function rollDice(){
   S.dice=[d1,d2]; S.hasRolled=true;
   const sum=d1+d2;
   S.rollCounts[sum]++;                 // live stats: roll-frequency histogram
+  // live stats: every roll, accrue each player's expected production (their board pips / 36)
+  for(let i=0;i<S.nPlayers;i++) S.players[i].expProd+=expectedPips(i)/36;
   if(sum===7){
     // A 7: first everyone over the hand limit discards, THEN the robber moves.
     S.pendingRobber=true; S.mode=null;
@@ -968,7 +1003,7 @@ function rollDice(){
     });
     // live stats: tally what was actually produced, overall and per player
     Object.keys(gains).forEach(p=>{ const g=gains[p];
-      Object.keys(g).forEach(r=>{ S.production[r]+=g[r]; S.playerProduction[p][r]+=g[r]; }); });
+      Object.keys(g).forEach(r=>{ S.production[r]+=g[r]; S.playerProduction[p][r]+=g[r]; S.players[p].lifetimeRes+=g[r]; }); });
     const parts=Object.keys(gains).map(p=>PLAYER_NAMES[p]+" +"+Object.keys(gains[p]).map(r=>gains[p][r]+RES_SHORT[r][0]).join(""));
     let msg="Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production.");
     if(short.length) msg+=" — bank short on "+short.join(", ")+".";
@@ -1385,7 +1420,7 @@ const ROLL_EXPECT=[0,0,1,2,3,4,5,6,5,4,3,2,1];
 function renderStats(){
   const box=$("statsView"); if(!box || currentView!=="stats") return;   // only build when visible
   if(!S){ box.innerHTML=`<div class="stats-block"><div class="stats-empty">Start a game to see live statistics.</div></div>`; return; }
-  box.innerHTML=diceStatsHTML()+prodStatsHTML();
+  box.innerHTML=diceStatsHTML()+prodStatsHTML()+playerStatsHTML();
 }
 function diceStatsHTML(){
   const counts=S.rollCounts;
@@ -1434,6 +1469,74 @@ function prodStatsHTML(){
       <div class="stats-sub">Resources players have collected from dice rolls.</div>
       <div class="prod-chips">${chips}</div>
       <table class="prod-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+}
+// A small key/value line inside a player stat card.
+function pstatRow(k,v,cls){ return `<div class="pstat-row"><span class="pr-k">${k}</span><span class="pr-v${cls?(" "+cls):""}">${v}</span></div>`; }
+function playerStatsHTML(){
+  const cards=S.players.map(pl=>{
+    const i=pl.i;
+    const settle=ownCount(i,"settlement"), city=ownCount(i,"city"), roads=ownCount(i,"road");
+    const lrVP=(S.longestRoad===i)?2:0, laVP=(S.largestArmy===i)?2:0;
+    // Public VP only — hidden Victory Point dev cards stay secret until the final scoreboard.
+    const pubVP=settle*1+city*2+lrVP+laVP;
+    const held=Object.values(pl.dev).reduce((a,b)=>a+b,0);   // total dev cards in hand (incl. hidden VP)
+    const inHand=totalCards(i);
+    const actual=RES_ORDER.reduce((s,r)=>s+S.playerProduction[i][r],0);
+    const exp=pl.expProd, diff=actual-exp;
+    const sign=diff>=0?"+":"−", diffCls=Math.abs(diff)<0.05?"muted":(diff>0?"lucky":"unlucky");
+    const vpRows=
+      pstatRow("Settlements",settle,settle?"":"muted")+
+      pstatRow("Cities (×2)",city*2,city?"":"muted")+
+      pstatRow("Longest Road",lrVP?`+2 <span class="award pstat-award">⛏ road</span>`:"—",lrVP?"":"muted")+
+      pstatRow("Largest Army",laVP?`+2 <span class="award pstat-award">⚔ army</span>`:"—",laVP?"":"muted");
+    return `<div class="pstat-card">
+      <div class="pstat-head">
+        <span class="swatch" style="background:${PLAYER_COLORS[i]}"></span>
+        <span class="pstat-name">${PLAYER_NAMES[i]}</span>
+        <span class="pstat-vp">${pubVP} <small>VP</small></span>
+      </div>
+      <div class="pstat-sec"><div class="pstat-sl">Victory Points</div><div class="pstat-rows">${vpRows}</div></div>
+      <div class="pstat-sec"><div class="pstat-sl">Pieces Built</div><div class="pstat-rows">
+        ${pstatRow("Settlements",settle,settle?"":"muted")}
+        ${pstatRow("Cities",city,city?"":"muted")}
+        ${pstatRow("Roads",roads,roads?"":"muted")}
+      </div></div>
+      <div class="pstat-sec"><div class="pstat-sl">Roads &amp; Army</div><div class="pstat-rows">
+        ${pstatRow("Longest road",pl.roadLen,pl.roadLen?"":"muted")}
+        ${pstatRow("Knights played",pl.playedKnights,pl.playedKnights?"":"muted")}
+      </div></div>
+      <div class="pstat-sec"><div class="pstat-sl">Development Cards</div><div class="pstat-rows">
+        ${pstatRow("Bought",pl.devBought,pl.devBought?"":"muted")}
+        ${pstatRow("Played",pl.devPlayed,pl.devPlayed?"":"muted")}
+        ${pstatRow("In hand",held,held?"":"muted")}
+      </div></div>
+      <div class="pstat-sec"><div class="pstat-sl">Resources</div><div class="pstat-rows">
+        ${pstatRow("Cards in hand",inHand,inHand?"":"muted")}
+        ${pstatRow("Collected (lifetime)",pl.lifetimeRes,pl.lifetimeRes?"":"muted")}
+      </div></div>
+      <div class="pstat-sec"><div class="pstat-sl">Robber</div><div class="pstat-rows">
+        ${pstatRow("Robber moves",pl.robberMoves,pl.robberMoves?"":"muted")}
+        ${pstatRow("Cards stolen",pl.cardsStolen,pl.cardsStolen?"":"muted")}
+        ${pstatRow("Stolen from",pl.cardsStolenFrom,pl.cardsStolenFrom?"":"muted")}
+      </div></div>
+      <div class="pstat-sec"><div class="pstat-sl">Trading</div><div class="pstat-rows">
+        ${pstatRow("Bank trades",pl.tradesBank,pl.tradesBank?"":"muted")}
+        ${pstatRow("Harbour trades",pl.tradesHarbour,pl.tradesHarbour?"":"muted")}
+        ${pstatRow("Player trades",pl.tradesPlayer,pl.tradesPlayer?"":"muted")}
+        ${pstatRow("Discarded on 7s",pl.discardsLost,pl.discardsLost?"":"muted")}
+      </div></div>
+      <div class="pstat-sec"><div class="pstat-sl">Luck — Actual vs Expected</div><div class="pstat-rows">
+        ${pstatRow("Actual (rolls)",actual,actual?"":"muted")}
+        ${pstatRow("Expected",exp.toFixed(1),exp?"":"muted")}
+        ${pstatRow(diff>=0?"Luck (ahead)":"Luck (behind)",sign+Math.abs(diff).toFixed(1),diffCls)}
+      </div></div>
+    </div>`;
+  }).join("");
+  return `<div class="stats-block">
+      <div class="stats-h">Players</div>
+      <div class="stats-sub">Live per-player breakdown. Hidden Victory Point cards are not shown here.</div>
+      <div class="pstat-grid">${cards}</div>
     </div>`;
 }
 function renderAll(){
@@ -1634,6 +1737,8 @@ function doMaritimeTrade(harbour){
   if(S.bank[rc]<1){ flash("The bank is out of "+RES_SHORT[rc].toLowerCase()+" — pick another resource."); return; }
   S.players[p].resources[g]-=rate; S.bank[g]+=rate;
   S.players[p].resources[rc]+=1; S.bank[rc]-=1;
+  S.players[p].lifetimeRes+=1;
+  if(harbour) S.players[p].tradesHarbour++; else S.players[p].tradesBank++;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[g].toLowerCase()+" for 1 "+RES_SHORT[rc].toLowerCase()+
     (harbour?" at a harbour ("+rate+":1).":" with the bank (4:1)."),true);
   recordSnapshot();
@@ -1722,6 +1827,10 @@ function tradeRespond(accept){
     S.players[p].resources[r]-=TRADE.give[r]; S.players[q].resources[r]+=TRADE.give[r];
     S.players[q].resources[r]-=TRADE.receive[r]; S.players[p].resources[r]+=TRADE.receive[r];
   });
+  // both sides gain the cards they received; both record a player-to-player trade
+  S.players[p].lifetimeRes+=RES_ORDER.reduce((s,r)=>s+TRADE.receive[r],0);
+  S.players[q].lifetimeRes+=RES_ORDER.reduce((s,r)=>s+TRADE.give[r],0);
+  S.players[p].tradesPlayer++; S.players[q].tradesPlayer++;
   pushLog(PLAYER_NAMES[p]+" and "+PLAYER_NAMES[q]+" trade — "+PLAYER_NAMES[p]+" gives "+resList(TRADE.give)+", gets "+resList(TRADE.receive)+".",true);
   recordSnapshot();
   closeTrade();
@@ -1772,6 +1881,7 @@ function confirmDiscard(){
   const selSum=RES_ORDER.reduce((s,r)=>s+DISCARD.sel[r],0);
   if(selSum!==DISCARD.need) return;
   RES_ORDER.forEach(r=>{ S.players[p].resources[r]-=DISCARD.sel[r]; S.bank[r]+=DISCARD.sel[r]; });
+  S.players[p].discardsLost+=DISCARD.need;
   pushLog(PLAYER_NAMES[p]+" discards "+DISCARD.need+" card"+(DISCARD.need===1?"":"s")+".",true);
   recordSnapshot();
   DISCARD=null; S.discardIdx++;
@@ -1816,7 +1926,7 @@ function buyDev(){
   if(!canAfford(p,COST.dev)){ flash("Not enough resources — a development card costs "+costText(COST.dev)+"."); return; }
   pay(p,COST.dev);
   const card=S.deck.shift();                 // drawn from the top, hidden from opponents
-  S.players[p].dev[card]++; S.players[p].devNew[card]++;
+  S.players[p].dev[card]++; S.players[p].devNew[card]++; S.players[p].devBought++;
   pushLog(PLAYER_NAMES[p]+" buys a development card.",true);
   recomputeVP(); checkWin(); recordSnapshot(); renderAll();     // a bought VP card can win immediately
 }
@@ -1863,7 +1973,7 @@ function devListHTML(){
 function devPlayKnight(){
   if(S.players[S.cur].dev.knight-S.players[S.cur].devNew.knight<=0||S.devPlayedThisTurn) return;
   const p=S.cur;
-  S.players[p].dev.knight--; S.players[p].playedKnights++; S.devPlayedThisTurn=true;
+  S.players[p].dev.knight--; S.players[p].playedKnights++; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   DEV=null; $("devOverlay").classList.add("hidden");
   updateLargestArmy(); recomputeVP(); checkWin();
   if(S.phase==="over"){ recordSnapshot(); renderAll(); return; }
@@ -1875,7 +1985,7 @@ function devPlayKnight(){
 function devPlayRoad(){
   const p=S.cur;
   if(S.players[p].dev.road-S.players[p].devNew.road<=0||S.devPlayedThisTurn||!canPlayRoadBuilding(p)) return;
-  S.players[p].dev.road--; S.devPlayedThisTurn=true;
+  S.players[p].dev.road--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   S.freeRoadsLeft=2; S.mode="roadBuild";
   DEV=null; $("devOverlay").classList.add("hidden");
   pushLog(PLAYER_NAMES[p]+" plays Road Building — place 2 free roads.",true);
@@ -1928,7 +2038,8 @@ function confirmPlenty(){
   if(sum!==cap||cap===0) return;
   if(RES_ORDER.some(r=>DEV.sel[r]>S.bank[r])) return;          // never draw more than the bank holds
   RES_ORDER.forEach(r=>{S.players[p].resources[r]+=DEV.sel[r]; S.bank[r]-=DEV.sel[r];});
-  S.players[p].dev.plenty--; S.devPlayedThisTurn=true;
+  S.players[p].lifetimeRes+=sum;
+  S.players[p].dev.plenty--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(DEV.sel)+".",true);
   DEV=null; $("devOverlay").classList.add("hidden");
   recomputeVP(); recordSnapshot(); renderAll();
@@ -1951,7 +2062,8 @@ function confirmMono(){
   let total=0;
   for(let i=0;i<S.nPlayers;i++){ if(i===p) continue; total+=S.players[i].resources[r]; S.players[i].resources[r]=0; }
   S.players[p].resources[r]+=total;
-  S.players[p].dev.mono--; S.devPlayedThisTurn=true;
+  S.players[p].lifetimeRes+=total;
+  S.players[p].dev.mono--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[r].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
   DEV=null; $("devOverlay").classList.add("hidden");
   recomputeVP(); recordSnapshot(); renderAll();
@@ -2042,6 +2154,16 @@ function botTickOnce(){
 
 /* ---- placement scoring (used everywhere a bot picks a spot) ---- */
 function pips(n){ return (n==null)?0:6-Math.abs(7-n); }
+/* Sum of pips for every number a player's settlements/cities sit on (city counts double).
+   Divided by 36 this is their expected resource yield per roll. */
+function expectedPips(p){
+  let sum=0;
+  for(const vid in S.buildings){ const b=S.buildings[vid]; if(b.player!==p) continue;
+    const mult=(b.type==="city")?2:1;
+    vertices[vid].hexes.forEach(hi=>{ sum+=pips(hexes[hi].number)*mult; });
+  }
+  return sum;
+}
 function harbourAt(vid){ return harbours.find(h=>h.v1===vid||h.v2===vid)||null; }
 function playerCoverage(p){
   const res=new Set(), nums=new Set();
@@ -2143,6 +2265,7 @@ function botDiscard(p){
     RES_ORDER.forEach(r=>{ if(S.players[p].resources[r]>0){ const v=S.players[p].resources[r]*2-keepW[r]; if(v>best){best=v;pick=r;} }});
     if(pick){ S.players[p].resources[pick]--; S.bank[pick]++; }
   }
+  S.players[p].discardsLost+=need;
   pushLog(PLAYER_NAMES[p]+" discards "+need+" card"+(need===1?"":"s")+".",true);
 }
 
@@ -2248,6 +2371,8 @@ function botTradeFor(cost){
   if(recv==null) return false;
   S.players[p].resources[give]-=rate; S.bank[give]+=rate;
   S.players[p].resources[recv]+=1; S.bank[recv]-=1;
+  S.players[p].lifetimeRes+=1;
+  if(rate<4) S.players[p].tradesHarbour++; else S.players[p].tradesBank++;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[give].toLowerCase()+" for 1 "+RES_SHORT[recv].toLowerCase()+(rate<4?" at a harbour.":" with the bank."),true);
   recordSnapshot();
   return true;
@@ -2318,8 +2443,8 @@ function botPlentyPick(p){
 }
 function playBotPlenty(two){
   const p=S.cur;
-  two.forEach(r=>{ S.players[p].resources[r]++; S.bank[r]--; });
-  S.players[p].dev.plenty--; S.devPlayedThisTurn=true;
+  two.forEach(r=>{ S.players[p].resources[r]++; S.bank[r]--; S.players[p].lifetimeRes++; });
+  S.players[p].dev.plenty--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   const tally=zeroRes(); two.forEach(r=>tally[r]++);
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(tally)+".",true);
   recomputeVP(); recordSnapshot(); renderAll();
@@ -2328,7 +2453,8 @@ function playBotMonopoly(res){
   const p=S.cur; let total=0;
   for(let i=0;i<S.nPlayers;i++){ if(i===p) continue; total+=S.players[i].resources[res]; S.players[i].resources[res]=0; }
   S.players[p].resources[res]+=total;
-  S.players[p].dev.mono--; S.devPlayedThisTurn=true;
+  S.players[p].lifetimeRes+=total;
+  S.players[p].dev.mono--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[res].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
   recomputeVP(); recordSnapshot(); renderAll();
 }
