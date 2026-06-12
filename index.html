@@ -910,8 +910,10 @@ function checkWin(){
       (vpc?` Reveals ${vpc} Victory Point card${vpc>1?"s":""}.`:""),true);
   }
 }
-// True when the current player may take a turn action (buy/play dev, build, trade).
+// True when the current player may take a turn action (buy/build/trade) — these need the roll done first.
 function canActNow(){ return S.phase==="play"&&S.hasRolled&&!S.pendingRobber&&S.mode!=="robber"&&S.mode!=="roadBuild"; }
+// True when the current player may play a development card — allowed before OR after the roll.
+function canPlayDevNow(){ return S.phase==="play"&&!S.pendingRobber&&S.mode!=="robber"&&S.mode!=="roadBuild"; }
 
 /* ---------------- Mode entry from buttons ---------------- */
 function tryMode(type){
@@ -1251,7 +1253,7 @@ function renderActions(){
   mk("Buy dev card","",buyDev,!canAct||deckEmpty||!canAfford(p,COST.dev),
     deckEmpty?"deck empty":"1 ore · 1 wheat · 1 sheep");
   const playable=DEV_TYPES.reduce((s,t)=>s+(S.players[p].dev[t]-S.players[p].devNew[t]),0);
-  mk("Play dev card","",openDevPlay,!canAct||S.devPlayedThisTurn||playable<=0,
+  mk("Play dev card","",openDevPlay,!canPlayDevNow()||S.devPlayedThisTurn||playable<=0,
     S.devPlayedThisTurn?"one per turn":"knight · roads · plenty · mono");
   mk("End turn","span2",endTurn,!canAct);
   if(S.mode&&S.mode!=="robber"&&S.mode!=="roadBuild") mk("Cancel placement","cancel span2",cancelMode);
@@ -1644,7 +1646,7 @@ function buyDev(){
 }
 
 let DEV=null;
-function openDevPlay(){ if(!canActNow()) return; DEV={screen:"list"}; $("devOverlay").classList.remove("hidden"); renderDev(); }
+function openDevPlay(){ if(!canPlayDevNow()) return; DEV={screen:"list"}; $("devOverlay").classList.remove("hidden"); renderDev(); }
 function closeDev(){ DEV=null; $("devOverlay").classList.add("hidden"); renderAll(); }
 function devGoList(){ DEV={screen:"list"}; renderDev(); }
 function renderDev(){
@@ -1850,7 +1852,10 @@ function botTickOnce(){
   if(S.mode==="robber"){ botMoveRobber(); return; }
   if(S.mode==="roadBuild"){ botPlaceFreeRoad(); return; }
   if(S.pendingRobber) return;                  // waiting on a human discard
-  if(!S.hasRolled){ rollDice(); return; }
+  if(!S.hasRolled){
+    if(!S.devPlayedThisTurn && botMaybePlayDevPreRoll()) return;   // a dev card may be played before the roll too
+    rollDice(); return;
+  }
   if(botDoOneBuildOrPlay()) return;
   endTurn();                                   // nothing useful left — always end
 }
@@ -2064,6 +2069,17 @@ function botTradeFor(cost){
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[give].toLowerCase()+" for 1 "+RES_SHORT[recv].toLowerCase()+(rate<4?" at a harbour.":" with the bank."),true);
   recordSnapshot();
   return true;
+}
+// Pre-roll: only the cases where playing before the roll is clearly better than after.
+function botMaybePlayDevPreRoll(){
+  const p=S.cur, d=S.players[p].dev, nw=S.players[p].devNew;
+  const haveKnight=(d.knight-nw.knight)>0;
+  // Knight before rolling: shove the robber off our own tile so we still collect on this roll.
+  if(haveKnight){
+    const robberOnMe=hexes[S.robberHex].corners.some(v=>S.buildings[v]&&S.buildings[v].player===p);
+    if(robberOnMe){ devPlayKnight(); return true; }
+  }
+  return false;
 }
 function botMaybePlayDev(){
   const p=S.cur, d=S.players[p].dev, nw=S.players[p].devNew;
