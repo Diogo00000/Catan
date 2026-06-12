@@ -149,6 +149,22 @@
   .watch-row{display:flex; align-items:center; gap:8px; margin:2px 0 14px; font-size:12.5px; color:var(--ink); cursor:pointer;}
   .watch-row input{width:16px; height:16px; cursor:pointer;}
 
+  /* Replay / DVR */
+  #replaySection{display:none;}
+  .replay{display:flex; flex-direction:column; gap:8px;}
+  .replay.disabled{opacity:.55;}
+  .replay-top{display:flex; align-items:center; gap:8px;}
+  .replay-count{flex:1; font-size:11px; font-weight:700; color:var(--ink); letter-spacing:.2px;}
+  #replayLive{border:1px solid rgba(107,79,46,.35); border-radius:8px;}
+  .replay-slider{width:100%; margin:0; accent-color:var(--gold-deep); cursor:pointer;}
+  .replay-slider:disabled{cursor:not-allowed;}
+  .replay-ctl{display:flex; flex-wrap:wrap; align-items:center; gap:6px;}
+  .replay-ctl .seg{border:1px solid rgba(107,79,46,.35); border-radius:8px; min-width:32px; text-align:center;}
+  .replay-ctl .seg-group{border:1px solid rgba(107,79,46,.35); border-radius:8px;}
+  .replay-ctl .seg-group .seg{border:0; border-right:1px solid rgba(107,79,46,.22); border-radius:0; min-width:0;}
+  .replay-ctl .seg-group .seg:last-child{border-right:0;}
+  .replay-label{min-height:1.5em; font-size:11px; line-height:1.5; color:var(--ink-soft); font-style:italic;}
+
   /* Log */
   .log{font-size:11.5px; line-height:1.6; color:var(--ink-soft); max-height:108px; overflow-y:auto;}
   .log div{padding:1px 0;}
@@ -304,6 +320,31 @@
 
     <div class="section">
       <div class="log" id="log"></div>
+    </div>
+
+    <div class="section" id="replaySection">
+      <div class="replay">
+        <div class="replay-top">
+          <span class="spd-lab">Replay</span>
+          <span class="replay-count" id="replayCount">—</span>
+          <button class="seg" id="replayLive" title="Jump back to the live game">Return to present ⏭</button>
+        </div>
+        <input type="range" id="replaySlider" class="replay-slider" min="0" max="0" value="0" step="1"
+          aria-label="Replay timeline">
+        <div class="replay-ctl">
+          <button class="seg" id="replayFirst" title="First play">|◀</button>
+          <button class="seg" id="replayPrev" title="Previous play">◀</button>
+          <button class="seg" id="replayPlay" title="Play / pause the replay">▶</button>
+          <button class="seg" id="replayNext" title="Next play">▶|</button>
+          <span class="spd-lab">Speed</span>
+          <div class="seg-group" id="replaySpdGroup">
+            <button class="seg rspd" data-ms="1700">Slow</button>
+            <button class="seg rspd" data-ms="1000">Normal</button>
+            <button class="seg rspd" data-ms="450">Fast</button>
+          </div>
+        </div>
+        <div class="replay-label" id="replayLabel"></div>
+      </div>
     </div>
   </aside>
 </div>
@@ -551,7 +592,9 @@ function startGame(){
   PLAYER_TYPES=seats.map(s=>s.type||"human");
   watchMode=!!($("watchStart")&&$("watchStart").checked);
   watchPendingOff=false; paused=false; clearTimeout(botTimer);
+  resetReplay();
   $("autoSection").style.display="block";
+  $("replaySection").style.display="block";
   COUNTS=(n>=5)?COUNTS_LARGE:COUNTS_SMALL;   // larger board for 5-6 players
   buildGeometry();
   const robberHex=assignTiles();
@@ -591,6 +634,8 @@ function startGame(){
   $("overlay").classList.add("hidden");
   drawStaticBoard();
   beginSetupTurn();
+  recordSnapshot("Game begins — place your first settlement.");   // starting frame for the scrubber
+  renderReplayBar();
 }
 
 function pushLog(msg,now){ S.log.push({msg,now}); if(S.log.length>40)S.log.shift(); }
@@ -723,19 +768,22 @@ function commitSettlement(vid){
       if(got.length) pushLog(PLAYER_NAMES[S.cur]+" collects "+got.join(", ")+" from the second settlement.");
     }
     S.lastSetupV=vid; S.mode="setupRoad";
-    updateLongestRoad(); recomputeVP(); renderAll();
+    updateLongestRoad(); recomputeVP();
+    recordSnapshot(PLAYER_NAMES[S.cur]+" places a settlement.");
+    renderAll();
     return;
   }
   // normal play
   pay(S.cur,COST.settlement);
   S.buildings[vid]={player:S.cur,type:"settlement"};
   pushLog(PLAYER_NAMES[S.cur]+" builds a settlement.",true);
-  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); renderAll();
+  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); recordSnapshot(); renderAll();
 }
 function commitRoad(eid){
   if(S.phase==="setup"){
     S.roads[eid]=S.cur;
     updateLongestRoad();
+    recordSnapshot(PLAYER_NAMES[S.cur]+" places a road.");
     S.setupIdx++;
     if(S.setupIdx<S.setupQueue.length){ beginSetupTurn(); }
     else { // setup complete
@@ -750,21 +798,22 @@ function commitRoad(eid){
     S.roads[eid]=S.cur; S.freeRoadsLeft--;
     pushLog(PLAYER_NAMES[S.cur]+" builds a free road.",true);
     updateLongestRoad(); recomputeVP(); checkWin();
-    if(S.phase==="over"){ S.mode=null; renderAll(); return; }
+    if(S.phase==="over"){ S.mode=null; recordSnapshot(); renderAll(); return; }
     if(!(S.freeRoadsLeft>0 && ownCount(S.cur,"road")<LIMIT.road && legalRoads(S.cur,false,null).length>0)) S.mode=null;
+    recordSnapshot();
     renderAll();
     return;
   }
   pay(S.cur,COST.road);
   S.roads[eid]=S.cur;
   pushLog(PLAYER_NAMES[S.cur]+" builds a road.",true);
-  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); renderAll();
+  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); recordSnapshot(); renderAll();
 }
 function commitCity(vid){
   pay(S.cur,COST.city);
   S.buildings[vid].type="city";
   pushLog(PLAYER_NAMES[S.cur]+" upgrades to a city.",true);
-  S.mode=null; recomputeVP(); checkWin(); renderAll();
+  S.mode=null; recomputeVP(); checkWin(); recordSnapshot(); renderAll();
 }
 function commitRobber(hi){
   S.robberHex=hi; S.mode=null;
@@ -793,6 +842,7 @@ function finishRobber(victim){
       pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[victim]+".",true);
     }
   }
+  recordSnapshot();
   renderAll();
 }
 
@@ -810,6 +860,7 @@ function rollDice(){
     for(let k=0;k<S.nPlayers;k++){const pi=(S.cur+k)%S.nPlayers; if(totalCards(pi)>7) order.push(pi);}
     if(order.length){
       S.discardQueue=order; S.discardIdx=0;
+      recordSnapshot();
       renderAll();
       advanceDiscards();
       return;
@@ -827,6 +878,7 @@ function rollDice(){
     const parts=Object.keys(gains).map(p=>PLAYER_NAMES[p]+" +"+Object.keys(gains[p]).map(r=>gains[p][r]+RES_SHORT[r][0]).join(""));
     pushLog("Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production."),true);
   }
+  recordSnapshot();
   renderAll();
 }
 function endTurn(){
@@ -840,6 +892,7 @@ function endTurn(){
   const sum=S.players.reduce((s,pl)=>s+pl.vp,0);
   if(sum>S._stallSum){ S._stallSum=sum; S._stallTurns=0; }
   else { S._stallTurns++; if(S._stallTurns>=STALL_LIMIT && isBot(S.cur)){ declareStalemate(); } }
+  recordSnapshot(S.phase==="over"?null:"Turn passes to "+PLAYER_NAMES[S.cur]+".");
   renderAll();
 }
 function declareStalemate(){
@@ -1211,7 +1264,106 @@ function renderLog(){
 function renderAll(){
   renderPieces(); renderInteract();
   renderDice(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
-  renderAutoBar(); scheduleBot();
+  renderAutoBar(); renderReplayBar(); scheduleBot();
+}
+
+/* ================= REPLAY / DVR =================
+   A snapshot is a DEEP COPY of the whole mutable game state (S) plus the matching
+   log message, recorded after every state-changing play. Viewing the past renders
+   from a throwaway copy, so reviewing old states never mutates the live game and
+   later plays never alter stored snapshots. */
+const REPLAY={ snaps:[], idx:-1, viewing:false, playing:false, timer:null, speed:1000 };
+function deepState(){ return JSON.parse(JSON.stringify(S)); }      // S is plain data — fully JSON-safe
+function recordSnapshot(label){
+  if(!S || REPLAY.viewing) return;                 // never record while reviewing the past
+  const lab=(label!=null)?label:(S.log.length?S.log[S.log.length-1].msg:"");
+  REPLAY.snaps.push({ state:deepState(), label:lab });
+  REPLAY.idx=REPLAY.snaps.length-1;                // the live position tracks the newest play
+}
+function resetReplay(){ stopReplayPlaying(); REPLAY.snaps=[]; REPLAY.idx=-1; REPLAY.viewing=false; }
+function replayAvailable(){ return !!S && REPLAY.snaps.length>0 && (!watchMode||paused); }
+function replayCurrentIndex(){ return REPLAY.viewing?REPLAY.idx:REPLAY.snaps.length-1; }
+function enterReplay(i){
+  if(!replayAvailable()) return;
+  const last=REPLAY.snaps.length-1;
+  i=Math.max(0,Math.min(last,i));
+  if(i>=last){ returnToPresent(); return; }        // the newest snapshot == the live game
+  REPLAY.viewing=true; REPLAY.idx=i;
+  clearTimeout(botTimer);                           // freeze live auto-play while reviewing
+  renderReplayView();
+}
+function returnToPresent(){
+  stopReplayPlaying();
+  REPLAY.viewing=false; REPLAY.idx=REPLAY.snaps.length-1;
+  renderAll();                                      // live render re-enables controls & bots
+}
+function stopReplayPlaying(){ REPLAY.playing=false; clearTimeout(REPLAY.timer); }
+function toggleReplayPlay(){
+  if(!replayAvailable()) return;
+  if(REPLAY.playing){ stopReplayPlaying(); renderReplayBar(); return; }
+  let i=replayCurrentIndex();
+  if(i>=REPLAY.snaps.length-1) i=0;                 // restart from the top if sitting at the end
+  REPLAY.playing=true;
+  enterReplay(i);
+  replayTick();
+}
+function replayTick(){
+  clearTimeout(REPLAY.timer);
+  if(!REPLAY.playing) return;
+  REPLAY.timer=setTimeout(()=>{
+    if(!REPLAY.playing) return;
+    const next=replayCurrentIndex()+1;
+    if(next>=REPLAY.snaps.length-1){ stopReplayPlaying(); returnToPresent(); return; }  // reached the end → live
+    enterReplay(next);
+    replayTick();
+  }, REPLAY.speed);
+}
+// Render a chosen snapshot read-only: swap S to a throwaway copy, draw, then restore.
+function renderReplayView(){
+  const snap=REPLAY.snaps[REPLAY.idx];
+  if(!snap){ returnToPresent(); return; }
+  const liveS=S;
+  S=JSON.parse(JSON.stringify(snap.state));         // a fresh copy so rendering can't touch the stored snap
+  try{
+    renderPieces();
+    layers.interact.innerHTML="";                   // no clickable candidates while reviewing the past
+    renderDice(); renderPlayers(); renderPrompt(); renderLog();
+    renderReplayActions();
+  } finally { S=liveS; }
+  renderReplayBar();
+}
+function renderReplayActions(){
+  const box=$("actions"); box.innerHTML="";
+  const tip=document.createElement("div");
+  tip.className="bot-tip"; tip.style.gridColumn="span 2";
+  tip.textContent="👁 Viewing play "+(REPLAY.idx+1)+" of "+REPLAY.snaps.length+" — the live game is untouched.";
+  box.appendChild(tip);
+  const b=document.createElement("button");
+  b.className="btn primary span2"; b.textContent="Return to present";
+  b.addEventListener("click",returnToPresent); box.appendChild(b);
+}
+function renderReplayBar(){
+  const sec=$("replaySection"); if(!sec||!S) return;
+  const n=REPLAY.snaps.length, avail=replayAvailable(), cur=replayCurrentIndex();
+  const wrap=sec.querySelector(".replay"); if(wrap) wrap.classList.toggle("disabled",!avail);
+  const sl=$("replaySlider");
+  sl.max=Math.max(0,n-1); sl.value=Math.max(0,cur); sl.disabled=!avail||n<=1;
+  $("replayFirst").disabled=!avail||cur<=0;
+  $("replayPrev").disabled =!avail||cur<=0;
+  $("replayNext").disabled =!avail||cur>=n-1;
+  $("replayPlay").disabled =!avail||n<=1;
+  $("replayPlay").textContent=REPLAY.playing?"⏸":"▶";
+  $("replayPlay").classList.toggle("sel",REPLAY.playing);
+  $("replayLive").disabled =!avail||!REPLAY.viewing;
+  document.querySelectorAll(".rspd").forEach(b=>{ b.disabled=!avail; b.classList.toggle("sel",+b.dataset.ms===REPLAY.speed); });
+  if(n===0){ $("replayCount").textContent="—"; $("replayLabel").textContent=""; }
+  else if(REPLAY.viewing){
+    $("replayCount").textContent="Play "+(cur+1)+" of "+n;
+    $("replayLabel").textContent=REPLAY.snaps[cur].label||"";
+  } else {
+    $("replayCount").textContent="Live · "+n+" play"+(n===1?"":"s");
+    $("replayLabel").textContent=avail?("Latest: "+(REPLAY.snaps[n-1].label||"")):"Pause or switch to Manual to rewind.";
+  }
 }
 
 /* ================= TRADING ================= */
@@ -1306,6 +1458,7 @@ function doMaritimeTrade(harbour){
   S.players[p].resources[g]-=rate; S.players[p].resources[rc]+=1;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[g].toLowerCase()+" for 1 "+RES_SHORT[rc].toLowerCase()+
     (harbour?" at a harbour ("+rate+":1).":" with the bank (4:1)."),true);
+  recordSnapshot();
   closeTrade();
 }
 
@@ -1392,6 +1545,7 @@ function tradeRespond(accept){
     S.players[q].resources[r]-=TRADE.receive[r]; S.players[p].resources[r]+=TRADE.receive[r];
   });
   pushLog(PLAYER_NAMES[p]+" and "+PLAYER_NAMES[q]+" trade — "+PLAYER_NAMES[p]+" gives "+resList(TRADE.give)+", gets "+resList(TRADE.receive)+".",true);
+  recordSnapshot();
   closeTrade();
 }
 
@@ -1441,6 +1595,7 @@ function confirmDiscard(){
   if(selSum!==DISCARD.need) return;
   RES_ORDER.forEach(r=>{ S.players[p].resources[r]-=DISCARD.sel[r]; });
   pushLog(PLAYER_NAMES[p]+" discards "+DISCARD.need+" card"+(DISCARD.need===1?"":"s")+".",true);
+  recordSnapshot();
   DISCARD=null; S.discardIdx++;
   advanceDiscards();
 }
@@ -1450,7 +1605,7 @@ function advanceDiscards(){
   while(S.discardQueue && S.discardIdx<S.discardQueue.length){
     const p=S.discardQueue[S.discardIdx];
     if(totalCards(p)<=7){ S.discardIdx++; continue; }
-    if(isBot(p)){ botDiscard(p); S.discardIdx++; continue; }
+    if(isBot(p)){ botDiscard(p); recordSnapshot(); S.discardIdx++; continue; }
     openDiscard(); return;                     // human: wait for confirmDiscard()
   }
   S.discardQueue=null; S.discardIdx=0;
@@ -1485,7 +1640,7 @@ function buyDev(){
   const card=S.deck.shift();                 // drawn from the top, hidden from opponents
   S.players[p].dev[card]++; S.players[p].devNew[card]++;
   pushLog(PLAYER_NAMES[p]+" buys a development card.",true);
-  recomputeVP(); checkWin(); renderAll();     // a bought VP card can win immediately
+  recomputeVP(); checkWin(); recordSnapshot(); renderAll();     // a bought VP card can win immediately
 }
 
 let DEV=null;
@@ -1533,9 +1688,10 @@ function devPlayKnight(){
   S.players[p].dev.knight--; S.players[p].playedKnights++; S.devPlayedThisTurn=true;
   DEV=null; $("devOverlay").classList.add("hidden");
   updateLargestArmy(); recomputeVP(); checkWin();
-  if(S.phase==="over"){ renderAll(); return; }
+  if(S.phase==="over"){ recordSnapshot(); renderAll(); return; }
   S.mode="robber";                              // robber move with no discard step
   pushLog(PLAYER_NAMES[p]+" plays a Knight.",true);
+  recordSnapshot();
   renderAll();
 }
 function devPlayRoad(){
@@ -1545,6 +1701,7 @@ function devPlayRoad(){
   S.freeRoadsLeft=2; S.mode="roadBuild";
   DEV=null; $("devOverlay").classList.add("hidden");
   pushLog(PLAYER_NAMES[p]+" plays Road Building — place 2 free roads.",true);
+  recordSnapshot();
   renderAll();
 }
 function devPlayPlentyStart(){
@@ -1592,7 +1749,7 @@ function confirmPlenty(){
   S.players[p].dev.plenty--; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(DEV.sel)+".",true);
   DEV=null; $("devOverlay").classList.add("hidden");
-  recomputeVP(); renderAll();
+  recomputeVP(); recordSnapshot(); renderAll();
 }
 function devMonoHTML(){
   const cells=RES_ORDER.map(r=>resCellHTML(r,DEV.pick===r,false,"",`devMonoPick('${r}')`)).join("");
@@ -1615,7 +1772,7 @@ function confirmMono(){
   S.players[p].dev.mono--; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[r].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
   DEV=null; $("devOverlay").classList.add("hidden");
-  recomputeVP(); renderAll();
+  recomputeVP(); recordSnapshot(); renderAll();
 }
 
 /* ================= COMPUTER PLAYERS (BOTS) ================= */
@@ -1639,6 +1796,7 @@ function applyPendingMode(){          // called at each turn boundary
 function setWatch(on){
   if(on){
     watchMode=true; watchPendingOff=false; paused=false;
+    if(REPLAY.viewing){ REPLAY.viewing=false; stopReplayPlaying(); }   // live watch leaves the scrubber
     if(S && (S.mode==="settlement"||S.mode==="road"||S.mode==="city")) S.mode=null;   // drop a dangling human placement
     pushLog("Auto-play on — watching the bots.",true);
   } else if(watchMode){
@@ -1646,7 +1804,11 @@ function setWatch(on){
   }
   renderAll();
 }
-function togglePause(){ paused=!paused; renderAll(); }
+function togglePause(){
+  paused=!paused;
+  if(!paused && watchMode && REPLAY.viewing){ REPLAY.viewing=false; stopReplayPlaying(); }  // resuming live watch ends review
+  renderAll();
+}
 function renderAutoBar(){
   if(!S) return;
   $("modeAuto").classList.toggle("sel",watchMode);
@@ -1663,7 +1825,7 @@ function renderAutoBar(){
 
 /* ---- scheduler: one visible bot action per tick; always terminates ---- */
 function botActive(){
-  if(!S || S.phase==="over" || paused) return false;
+  if(!S || S.phase==="over" || paused || REPLAY.viewing) return false;
   if(DISCARD||TRADE||DEV||S.stealChoices) return false;   // a human dialog is resolving
   if(S.phase==="setup"||S.phase==="play") return isBot(S.cur);
   return false;
@@ -1900,6 +2062,7 @@ function botTradeFor(cost){
   const recv=Object.keys(need)[0];
   S.players[p].resources[give]-=rate; S.players[p].resources[recv]+=1;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[give].toLowerCase()+" for 1 "+RES_SHORT[recv].toLowerCase()+(rate<4?" at a harbour.":" with the bank."),true);
+  recordSnapshot();
   return true;
 }
 function botMaybePlayDev(){
@@ -1947,7 +2110,7 @@ function playBotPlenty(two){
   S.players[p].dev.plenty--; S.devPlayedThisTurn=true;
   const tally=zeroRes(); two.forEach(r=>tally[r]++);
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(tally)+".",true);
-  recomputeVP(); renderAll();
+  recomputeVP(); recordSnapshot(); renderAll();
 }
 function playBotMonopoly(res){
   const p=S.cur; let total=0;
@@ -1955,7 +2118,7 @@ function playBotMonopoly(res){
   S.players[p].resources[res]+=total;
   S.players[p].dev.mono--; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[res].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
-  recomputeVP(); renderAll();
+  recomputeVP(); recordSnapshot(); renderAll();
 }
 
 /* ---------------- Init ---------------- */
@@ -1964,6 +2127,13 @@ $("modeManual").addEventListener("click",()=>setWatch(false));
 $("modeAuto").addEventListener("click",()=>setWatch(true));
 $("pauseBtn").addEventListener("click",togglePause);
 document.querySelectorAll(".spd").forEach(b=>b.addEventListener("click",()=>{ speedMs=+b.dataset.ms; renderAutoBar(); scheduleBot(); }));
+$("replaySlider").addEventListener("input",e=>enterReplay(+e.target.value));
+$("replayFirst").addEventListener("click",()=>enterReplay(0));
+$("replayPrev").addEventListener("click",()=>enterReplay(replayCurrentIndex()-1));
+$("replayNext").addEventListener("click",()=>enterReplay(replayCurrentIndex()+1));
+$("replayPlay").addEventListener("click",toggleReplayPlay);
+$("replayLive").addEventListener("click",returnToPresent);
+document.querySelectorAll(".rspd").forEach(b=>b.addEventListener("click",()=>{ REPLAY.speed=+b.dataset.ms; renderReplayBar(); if(REPLAY.playing) replayTick(); }));
 buildGeometry();
 // draw an idle board behind the start overlay
 assignTiles();
