@@ -146,11 +146,6 @@
   #pauseBtn{border:1px solid rgba(107,79,46,.35); border-radius:8px;}
   .spd-lab{font-size:9px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-soft);}
   .auto-status{flex:1 1 100%; font-size:10.5px; color:var(--ink-soft); font-style:italic;}
-  .seat-type{font-family:'Outfit',sans-serif; font-size:11px; font-weight:600; cursor:pointer; flex:0 0 auto;
-    border:1px solid rgba(107,79,46,.35); border-radius:8px; padding:7px 8px; background:rgba(255,255,255,.35);
-    color:var(--ink); white-space:nowrap;}
-  .seat-type:hover{background:rgba(107,79,46,.12);}
-  .seat-type.bot{background:rgba(47,116,181,.18); border-color:#2f74b5;}
   .watch-row{display:flex; align-items:center; gap:8px; margin:2px 0 14px; font-size:12.5px; color:var(--ink); cursor:pointer;}
   .watch-row input{width:16px; height:16px; cursor:pointer;}
 
@@ -439,12 +434,23 @@ function assignTiles(){
       ...Array(4).fill("wheat"),...Array(3).fill("ore"),"desert"]);
     nums=shuffle([2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]);
   }
-  let ni=0; const deserts=[];
+  const deserts=[];
   hexes.forEach((h,i)=>{
     h.resource=bag[i];
     if(h.resource==="desert"){h.number=null; deserts.push(i);}
-    else h.number=nums[ni++];
   });
+  // Place number tokens, reshuffling until no red token (6 or 8) sits next to
+  // another red token. Two hexes are adjacent when they share an edge.
+  const adj=hexes.map(()=>[]);
+  edges.forEach(e=>{ if(e.hexes.length===2){const[a,b]=e.hexes; adj[a].push(b); adj[b].push(a);} });
+  const slots=hexes.map((h,i)=>i).filter(i=>hexes[i].resource!=="desert");
+  const isRed=v=>(v===6||v===8);
+  for(let attempt=0; attempt<400; attempt++){
+    slots.forEach((hi,k)=>{ hexes[hi].number=nums[k]; });
+    const bad=slots.some(hi=>isRed(hexes[hi].number) && adj[hi].some(nb=>isRed(hexes[nb].number)));
+    if(!bad) break;
+    shuffle(nums);   // try a different arrangement; keep the last one if the cap is hit
+  }
   // robber starts on a desert (one of the two on the large board)
   return deserts[Math.floor(Math.random()*deserts.length)];
 }
@@ -532,13 +538,7 @@ function renderSetup(){
       sw.addEventListener("click",()=>{ seat.color=c.hex; renderSetup(); });
       sws.appendChild(sw);
     });
-    const tbtn=document.createElement("button");
-    tbtn.type="button";
-    tbtn.className="seat-type"+(seat.type==="bot"?" bot":"");
-    tbtn.textContent=seat.type==="bot"?"🤖 Bot":"🧑 Human";
-    tbtn.title="Toggle human / computer player";
-    tbtn.addEventListener("click",()=>{ seat.type=(seat.type==="bot")?"human":"bot"; renderSetup(); });
-    row.appendChild(num); row.appendChild(inp); row.appendChild(sws); row.appendChild(tbtn);
+    row.appendChild(num); row.appendChild(inp); row.appendChild(sws);
     seats.appendChild(row);
   });
   refreshStartBtn();
