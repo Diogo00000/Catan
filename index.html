@@ -60,6 +60,53 @@
   }
   .compass text{font-family:'Cinzel',serif; fill:rgba(224,184,74,.7); font-size:11px; text-anchor:middle; dominant-baseline:central;}
 
+  /* ---------- View tabs (Board / Stats) ---------- */
+  .view-tabs{display:flex; justify-content:center; padding:2px 2px 8px;}
+  .view-tabs .seg-group{border-color:rgba(224,184,74,.4);}
+  .view-tabs .seg{background:rgba(255,255,255,.06); color:var(--parchment);
+    border-right-color:rgba(224,184,74,.25); padding:6px 16px; letter-spacing:.5px;}
+  .view-tabs .seg:hover:not(.sel){background:rgba(224,184,74,.14);}
+  .view-tabs .seg.sel{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); font-weight:700;}
+
+  /* ---------- Stats view ---------- */
+  .stats-view{padding:4px 2px 8px;}
+  .stats-block{background:linear-gradient(175deg,var(--parchment),var(--parchment-2));
+    border:1px solid var(--parchment-edge); border-radius:12px; padding:16px 18px; margin-bottom:14px; box-shadow:var(--shadow);}
+  .stats-block:last-child{margin-bottom:0;}
+  .stats-h{font-family:'Cinzel',Georgia,serif; font-weight:700; letter-spacing:2px; font-size:16px;
+    color:var(--wood-dark); text-transform:uppercase; margin:0 0 4px;}
+  .stats-sub{font-size:11.5px; color:var(--ink-soft); margin-bottom:14px;}
+  .stats-sub b{font-family:'Cinzel',serif; color:var(--wood-dark); font-weight:700; font-size:13px;}
+  .stats-empty{font-size:12.5px; color:var(--ink-soft); font-style:italic; text-align:center; padding:24px 0;}
+  /* Roll-frequency histogram */
+  .hist{display:flex; align-items:flex-end; gap:6px; height:172px;}
+  .hist-col{flex:1 1 0; display:flex; flex-direction:column; align-items:center; height:100%;}
+  .hist-count{font-family:'Cinzel',serif; font-weight:700; font-size:11.5px; color:var(--wood-dark); line-height:1.5;}
+  .hist-bar-area{position:relative; width:100%; flex:1 1 auto; display:flex; align-items:flex-end;}
+  .hist-bar{width:100%; background:linear-gradient(180deg,var(--gold),var(--gold-deep));
+    border:1px solid var(--gold-deep); border-bottom:0; border-radius:4px 4px 0 0; min-height:2px;}
+  .hist-bar.seven{background:linear-gradient(180deg,#c98a4a,#a85f2b); border-color:#a85f2b;}
+  .hist-exp{position:absolute; left:-3px; right:-3px; border-top:2px dashed var(--red-num); pointer-events:none;}
+  .hist-num{font-family:'Cinzel',serif; font-weight:700; font-size:12px; color:var(--ink-soft); margin-top:5px;}
+  .hist-legend{display:flex; align-items:center; gap:7px; font-size:10.5px; color:var(--ink-soft); margin-top:11px;}
+  .hist-legend .ln{display:inline-block; width:20px; border-top:2px dashed var(--red-num);}
+  /* Resource production */
+  .prod-chips{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;}
+  .prod-chip{display:flex; align-items:center; gap:5px; font-size:13px; font-weight:700; color:#fff;
+    border-radius:7px; padding:4px 9px; line-height:1.4;}
+  .prod-chip .pc-lab{font-weight:500; font-size:8.5px; letter-spacing:.5px; opacity:.85; text-transform:uppercase;}
+  .prod-table{width:100%; border-collapse:collapse; font-size:12px;}
+  .prod-table th, .prod-table td{padding:6px 4px; text-align:center;}
+  .prod-table th{font-size:9px; letter-spacing:.5px; text-transform:uppercase; color:var(--ink-soft);
+    font-weight:700; border-bottom:1px solid rgba(107,79,46,.25);}
+  .prod-table th.who, .prod-table td.who{text-align:left;}
+  .prod-table td{border-bottom:1px solid rgba(107,79,46,.12);}
+  .prod-table tbody tr:last-child td{border-bottom:0;}
+  .prod-table .num{font-family:'Cinzel',serif; font-weight:700; color:var(--wood-dark);}
+  .prod-table .num.zero{color:var(--ink-soft); font-weight:400; opacity:.5;}
+  .prod-who{display:inline-flex; align-items:center; gap:7px; font-weight:600; color:var(--ink);}
+  .prod-who .swatch{width:14px; height:14px; border-radius:4px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
+
   /* ---------- Panel ---------- */
   .panel{
     flex:0 0 348px; width:348px;
@@ -284,7 +331,14 @@
 
 <div class="wrap">
   <div class="board-card">
+    <div class="view-tabs">
+      <div class="seg-group">
+        <button class="seg sel" id="tabBoard" onclick="showView('board')">Board</button>
+        <button class="seg" id="tabStats" onclick="showView('stats')">Stats</button>
+      </div>
+    </div>
     <svg id="board" viewBox="-50 -50 700 690" role="img" aria-label="Catan board"></svg>
+    <div id="statsView" class="stats-view" style="display:none"></div>
   </div>
 
   <aside class="panel">
@@ -628,6 +682,10 @@ function startGame(){
     pendingRobber:false,
     lastSetupV:null,
     dice:[null,null],
+    // ---- live statistics ----
+    rollCounts:Array(13).fill(0),     // index = dice total (2..12) -> times rolled
+    production:{wood:0,brick:0,sheep:0,wheat:0,ore:0},                    // total of each resource paid out on rolls
+    playerProduction:Array.from({length:n},()=>({wood:0,brick:0,sheep:0,wheat:0,ore:0})),  // per-player dice gains
     // development deck (25): 14 Knight, 5 VP, 2 Road Building, 2 Year of Plenty, 2 Monopoly
     deck:shuffle([...Array(14).fill("knight"),...Array(5).fill("vp"),...Array(2).fill("road"),
       ...Array(2).fill("plenty"),...Array(2).fill("mono")]),
@@ -865,6 +923,7 @@ function rollDice(){
   const d1=1+Math.floor(Math.random()*6), d2=1+Math.floor(Math.random()*6);
   S.dice=[d1,d2]; S.hasRolled=true;
   const sum=d1+d2;
+  S.rollCounts[sum]++;                 // live stats: roll-frequency histogram
   if(sum===7){
     // A 7: first everyone over the hand limit discards, THEN the robber moves.
     S.pendingRobber=true; S.mode=null;
@@ -907,6 +966,9 @@ function rollDice(){
         short.push(RES_SHORT[r].toLowerCase());
       }
     });
+    // live stats: tally what was actually produced, overall and per player
+    Object.keys(gains).forEach(p=>{ const g=gains[p];
+      Object.keys(g).forEach(r=>{ S.production[r]+=g[r]; S.playerProduction[p][r]+=g[r]; }); });
     const parts=Object.keys(gains).map(p=>PLAYER_NAMES[p]+" +"+Object.keys(gains[p]).map(r=>gains[p][r]+RES_SHORT[r][0]).join(""));
     let msg="Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production.");
     if(short.length) msg+=" — bank short on "+short.join(", ")+".";
@@ -1307,10 +1369,77 @@ function renderBank(){
   });
   box.innerHTML=html;
 }
+/* ---------------- Live statistics view ---------------- */
+let currentView="board";                          // "board" | "stats"
+function showView(v){
+  currentView=v;
+  const onStats=(v==="stats");
+  $("board").style.display=onStats?"none":"block";
+  $("statsView").style.display=onStats?"block":"none";
+  $("tabBoard").classList.toggle("sel",!onStats);
+  $("tabStats").classList.toggle("sel",onStats);
+  if(onStats) renderStats();
+}
+// Expected shares of 36 rolls, indexed by total: 2&12=1, 3&11=2 … 7=6.
+const ROLL_EXPECT=[0,0,1,2,3,4,5,6,5,4,3,2,1];
+function renderStats(){
+  const box=$("statsView"); if(!box || currentView!=="stats") return;   // only build when visible
+  if(!S){ box.innerHTML=`<div class="stats-block"><div class="stats-empty">Start a game to see live statistics.</div></div>`; return; }
+  box.innerHTML=diceStatsHTML()+prodStatsHTML();
+}
+function diceStatsHTML(){
+  const counts=S.rollCounts;
+  const total=counts.reduce((a,b)=>a+b,0), sevens=counts[7];
+  // scale so the tallest bar AND the tallest expected marker both fit
+  let maxCount=0; for(let n=2;n<=12;n++) maxCount=Math.max(maxCount,counts[n]);
+  const scale=Math.max(maxCount,(6/36)*total,1);
+  let cols="";
+  for(let n=2;n<=12;n++){
+    const c=counts[n], exp=(ROLL_EXPECT[n]/36)*total;
+    const barH=(c/scale)*100, expB=(exp/scale)*100;
+    cols+=`<div class="hist-col">
+        <div class="hist-count">${c}</div>
+        <div class="hist-bar-area">
+          <div class="hist-bar${n===7?' seven':''}" style="height:${barH}%"></div>
+          ${total>0?`<div class="hist-exp" style="bottom:${expB}%" title="Theoretical: ${exp.toFixed(1)}"></div>`:""}
+        </div>
+        <div class="hist-num">${n}</div>
+      </div>`;
+  }
+  return `<div class="stats-block">
+      <div class="stats-h">Dice Rolls</div>
+      <div class="stats-sub"><b>${total}</b> roll${total===1?'':'s'} so far · <b>${sevens}</b> seven${sevens===1?'':'s'}</div>
+      <div class="hist">${cols}</div>
+      <div class="hist-legend"><span class="ln"></span> theoretical probability (expected count at this many rolls)</div>
+    </div>`;
+}
+function prodStatsHTML(){
+  let chips="";
+  RES_ORDER.forEach(r=>{const dark=(r==='sheep'||r==='wheat');
+    chips+=`<span class="prod-chip" style="background:${TILE_COLORS[r]};${dark?'color:#3a2e10;':''}"><span class="pc-lab">${RES_SHORT[r]}</span>${S.production[r]}</span>`;});
+  let head=`<th class="who">Player</th>`;
+  RES_ORDER.forEach(r=>{head+=`<th>${RES_SHORT[r]}</th>`;});
+  head+=`<th>Total</th>`;
+  let rows="";
+  S.players.forEach(pl=>{
+    const pp=S.playerProduction[pl.i]; let cells="", tot=0;
+    RES_ORDER.forEach(r=>{const v=pp[r]; tot+=v; cells+=`<td class="num${v===0?' zero':''}">${v}</td>`;});
+    rows+=`<tr>
+        <td class="who"><span class="prod-who"><span class="swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>${PLAYER_NAMES[pl.i]}</span></td>
+        ${cells}<td class="num">${tot}</td>
+      </tr>`;
+  });
+  return `<div class="stats-block">
+      <div class="stats-h">Resource Production</div>
+      <div class="stats-sub">Resources players have collected from dice rolls.</div>
+      <div class="prod-chips">${chips}</div>
+      <table class="prod-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+}
 function renderAll(){
   renderPieces(); renderInteract();
   renderDice(); renderBank(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
-  renderAutoBar(); renderReplayBar(); scheduleBot();
+  renderAutoBar(); renderReplayBar(); renderStats(); scheduleBot();
 }
 
 /* ================= REPLAY / DVR =================
