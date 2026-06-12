@@ -95,6 +95,15 @@
   .sum{font-family:'Cinzel',serif; font-weight:700; font-size:30px; color:var(--wood-dark); min-width:34px; text-align:center;}
   .sum small{display:block; font-family:'Outfit',sans-serif; font-weight:500; font-size:9px; letter-spacing:1.5px; color:var(--ink-soft); text-transform:uppercase;}
 
+  /* Bank supply */
+  .bank{display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-top:12px;}
+  .bank-lab{font-size:9px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-soft); font-weight:600; margin-right:1px;}
+  .bank-chip{display:flex; align-items:center; gap:4px; font-size:11px; font-weight:700; color:#fff;
+    border-radius:6px; padding:2px 6px; line-height:1.4;}
+  .bank-chip.low{box-shadow:0 0 0 1.5px #9c3b30;}
+  .bank-chip.out{opacity:.45;}
+  .bank-chip .bc-lab{font-weight:500; font-size:8.5px; letter-spacing:.5px; opacity:.85; text-transform:uppercase;}
+
   /* Players */
   .players{display:flex; flex-direction:column; gap:9px;}
   .pcard{display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px;
@@ -289,6 +298,7 @@
         <div class="dice" id="dice"></div>
         <div class="sum" id="sum">–<small>Roll</small></div>
       </div>
+      <div class="bank" id="bank"></div>
     </div>
 
     <div class="section" id="autoSection">
@@ -601,6 +611,9 @@ function startGame(){
   assignHarbours();
   S={
     nPlayers:n,
+    // The bank: 19 cards of each resource. Everything players earn is drawn from here;
+    // everything they pay or discard returns here. Monopoly never touches the bank.
+    bank:{wood:19,brick:19,sheep:19,wheat:19,ore:19},
     players:Array.from({length:n},(_,i)=>({i,resources:{wood:0,brick:0,sheep:0,wheat:0,ore:0},vp:0,
       dev:{knight:0,vp:0,road:0,plenty:0,mono:0},      // development cards currently held
       devNew:{knight:0,vp:0,road:0,plenty:0,mono:0},   // of those, bought this turn (not yet playable)
@@ -707,7 +720,7 @@ function updateLargestArmy(){
 }
 function totalCards(p){return RES_ORDER.reduce((s,r)=>s+S.players[p].resources[r],0);}
 function canAfford(p,cost){return Object.keys(cost).every(r=>S.players[p].resources[r]>=cost[r]);}
-function pay(p,cost){Object.keys(cost).forEach(r=>S.players[p].resources[r]-=cost[r]);}
+function pay(p,cost){Object.keys(cost).forEach(r=>{S.players[p].resources[r]-=cost[r]; S.bank[r]+=cost[r];});}
 function costText(cost){return Object.keys(cost).map(r=>cost[r]+" "+RES_SHORT[r].toLowerCase()).join(", ");}
 
 /* Harbours a player can use (settlement or city on one of the harbour's vertices). */
@@ -764,7 +777,7 @@ function commitSettlement(vid){
     S.settlementsPlaced[S.cur]++;
     if(S.settlementsPlaced[S.cur]===2){ // second settlement yields starting resources
       const got=[];
-      vertices[vid].hexes.forEach(hi=>{const h=hexes[hi];if(h.resource!=="desert"){S.players[S.cur].resources[h.resource]++;got.push(RES_SHORT[h.resource]);}});
+      vertices[vid].hexes.forEach(hi=>{const h=hexes[hi];if(h.resource!=="desert"){S.players[S.cur].resources[h.resource]++;S.bank[h.resource]--;got.push(RES_SHORT[h.resource]);}});
       if(got.length) pushLog(PLAYER_NAMES[S.cur]+" collects "+got.join(", ")+" from the second settlement.");
     }
     S.lastSetupV=vid; S.mode="setupRoad";
@@ -868,15 +881,36 @@ function rollDice(){
     S.mode="robber";
     pushLog(PLAYER_NAMES[S.cur]+" — move the robber.",true);
   } else {
-    const gains={}; // player -> {res:amount}
+    // First tally what every player is owed per resource, without paying yet.
+    const demand={}; // res -> {byP:{player:amount}, total}
     hexes.forEach((h,hi)=>{
       if(h.number!==sum||hi===S.robberHex||h.resource==="desert") return;
       h.corners.forEach(v=>{const b=S.buildings[v];
-        if(b){const amt=b.type==="city"?2:1; S.players[b.player].resources[h.resource]+=amt;
-          gains[b.player]=gains[b.player]||{}; gains[b.player][h.resource]=(gains[b.player][h.resource]||0)+amt;}});
+        if(b){const amt=b.type==="city"?2:1, r=h.resource;
+          const d=demand[r]||(demand[r]={byP:{},total:0});
+          d.byP[b.player]=(d.byP[b.player]||0)+amt; d.total+=amt;}});
+    });
+    // Pay each resource out of the bank, applying the production-shortage rule per resource.
+    const gains={}, short=[];
+    RES_ORDER.forEach(r=>{
+      const d=demand[r]; if(!d) return;
+      const avail=S.bank[r];
+      const recipients=Object.keys(d.byP).map(Number);
+      if(d.total<=avail){                         // bank can pay everyone in full
+        recipients.forEach(pi=>{const a=d.byP[pi]; S.players[pi].resources[r]+=a; S.bank[r]-=a;
+          gains[pi]=gains[pi]||{}; gains[pi][r]=a;});
+      } else if(recipients.length===1){           // single claimant gets a partial payout
+        const pi=recipients[0], a=Math.min(d.byP[pi],avail);
+        if(a>0){ S.players[pi].resources[r]+=a; S.bank[r]-=a; gains[pi]=gains[pi]||{}; gains[pi][r]=a; }
+        short.push(RES_SHORT[r].toLowerCase()+" (partial)");
+      } else {                                    // several claimants, not enough for all → no one gets any
+        short.push(RES_SHORT[r].toLowerCase());
+      }
     });
     const parts=Object.keys(gains).map(p=>PLAYER_NAMES[p]+" +"+Object.keys(gains[p]).map(r=>gains[p][r]+RES_SHORT[r][0]).join(""));
-    pushLog("Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production."),true);
+    let msg="Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production.");
+    if(short.length) msg+=" — bank short on "+short.join(", ")+".";
+    pushLog(msg,true);
   }
   recordSnapshot();
   renderAll();
@@ -1263,9 +1297,19 @@ function renderLog(){
   S.log.slice(-7).reverse().forEach((l,idx)=>{const d=document.createElement("div");
     if(idx===0&&l.now)d.className="now"; d.textContent=l.msg; box.appendChild(d);});
 }
+function renderBank(){
+  const box=$("bank"); if(!box||!S||!S.bank) return;
+  let html=`<span class="bank-lab">Bank</span>`;
+  RES_ORDER.forEach(r=>{
+    const n=S.bank[r], dark=(r==='sheep'||r==='wheat');
+    const cls="bank-chip"+(n===0?" out":(n<=2?" low":""));
+    html+=`<span class="${cls}" style="background:${TILE_COLORS[r]};${dark?'color:#3a2e10;':''}" title="${RES_LABEL[r]} left in the bank"><span class="bc-lab">${RES_SHORT[r]}</span>${n}</span>`;
+  });
+  box.innerHTML=html;
+}
 function renderAll(){
   renderPieces(); renderInteract();
-  renderDice(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
+  renderDice(); renderBank(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
   renderAutoBar(); renderReplayBar(); scheduleBot();
 }
 
@@ -1329,7 +1373,7 @@ function renderReplayView(){
   try{
     renderPieces();
     layers.interact.innerHTML="";                   // no clickable candidates while reviewing the past
-    renderDice(); renderPlayers(); renderPrompt(); renderLog();
+    renderDice(); renderBank(); renderPlayers(); renderPrompt(); renderLog();
     renderReplayActions();
   } finally { S=liveS; }
   renderReplayBar();
@@ -1430,9 +1474,10 @@ function maritimeHTML(harbour){
       "have "+S.players[p].resources[r]+" · "+rate+":1",`tradePickGive('${r}')`);
   }).join("");
   const recvRow=RES_ORDER.map(r=>
-    resCellHTML(r,TRADE.receive===r,TRADE.give===r,"",`tradePickReceive('${r}')`)).join("");
+    resCellHTML(r,TRADE.receive===r,TRADE.give===r||S.bank[r]<1,
+      S.bank[r]<1?"bank out":"",`tradePickReceive('${r}')`)).join("");
   const rate=TRADE.give?(harbour?harbourRate(p,TRADE.give):4):null;
-  const ready=TRADE.give&&TRADE.receive&&TRADE.give!==TRADE.receive&&S.players[p].resources[TRADE.give]>=rate;
+  const ready=TRADE.give&&TRADE.receive&&TRADE.give!==TRADE.receive&&S.players[p].resources[TRADE.give]>=rate&&S.bank[TRADE.receive]>=1;
   let summary="Pick a resource to give, then one to receive.";
   if(TRADE.give&&TRADE.receive&&TRADE.give!==TRADE.receive)
     summary=`Give <strong>${rate} ${RES_SHORT[TRADE.give]}</strong> → receive <strong>1 ${RES_SHORT[TRADE.receive]}</strong>.`;
@@ -1457,7 +1502,9 @@ function doMaritimeTrade(harbour){
   if(!g||!rc||g===rc) return;
   const rate=harbour?harbourRate(p,g):4;
   if(S.players[p].resources[g]<rate) return;
-  S.players[p].resources[g]-=rate; S.players[p].resources[rc]+=1;
+  if(S.bank[rc]<1){ flash("The bank is out of "+RES_SHORT[rc].toLowerCase()+" — pick another resource."); return; }
+  S.players[p].resources[g]-=rate; S.bank[g]+=rate;
+  S.players[p].resources[rc]+=1; S.bank[rc]-=1;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[g].toLowerCase()+" for 1 "+RES_SHORT[rc].toLowerCase()+
     (harbour?" at a harbour ("+rate+":1).":" with the bank (4:1)."),true);
   recordSnapshot();
@@ -1595,7 +1642,7 @@ function confirmDiscard(){
   const p=DISCARD.player;
   const selSum=RES_ORDER.reduce((s,r)=>s+DISCARD.sel[r],0);
   if(selSum!==DISCARD.need) return;
-  RES_ORDER.forEach(r=>{ S.players[p].resources[r]-=DISCARD.sel[r]; });
+  RES_ORDER.forEach(r=>{ S.players[p].resources[r]-=DISCARD.sel[r]; S.bank[r]+=DISCARD.sel[r]; });
   pushLog(PLAYER_NAMES[p]+" discards "+DISCARD.need+" card"+(DISCARD.need===1?"":"s")+".",true);
   recordSnapshot();
   DISCARD=null; S.discardIdx++;
@@ -1714,7 +1761,9 @@ function devPlayMonoStart(){
   if(S.players[S.cur].dev.mono-S.players[S.cur].devNew.mono<=0||S.devPlayedThisTurn) return;
   DEV={screen:"mono",pick:null}; renderDev();
 }
+function plentyCap(){ return Math.min(2, RES_ORDER.reduce((s,r)=>s+S.bank[r],0)); }
 function devStepperRow(adjFn){
+  const cap=plentyCap();
   return `<div class="steppers">`+RES_ORDER.map(r=>{
     const val=DEV.sel[r], dark=(r==="sheep"||r==="wheat");
     const sum=RES_ORDER.reduce((s,x)=>s+DEV.sel[x],0);
@@ -1723,31 +1772,33 @@ function devStepperRow(adjFn){
       <div class="st-ctl">
         <button ${val<=0?"disabled":""} onclick="${adjFn}('${r}',-1)">−</button>
         <span class="st-val">${val}</span>
-        <button ${sum>=2?"disabled":""} onclick="${adjFn}('${r}',1)">+</button>
-      </div></div>`;
+        <button ${sum>=cap||val>=S.bank[r]?"disabled":""} onclick="${adjFn}('${r}',1)">+</button>
+      </div><div class="st-max">/ ${S.bank[r]}</div></div>`;
   }).join("")+`</div>`;
 }
 function devPlentyHTML(){
-  const sum=RES_ORDER.reduce((s,r)=>s+DEV.sel[r],0);
+  const sum=RES_ORDER.reduce((s,r)=>s+DEV.sel[r],0), cap=plentyCap();
+  const note=cap<2?` <em>(only ${cap} left in the bank)</em>`:"";
   return `
     <div class="trade-head"><h2>Year of Plenty</h2><span class="trade-who">${PLAYER_NAMES[S.cur]}</span></div>
-    <p class="trade-intro">Take any 2 resource cards from the bank. Chosen ${sum} / 2.</p>
+    <p class="trade-intro">Take any 2 resource cards the bank still has. Chosen ${sum} / ${cap}.${note}</p>
     <div class="trade-block">${devStepperRow("devPlentyAdjust")}</div>
     <div class="trade-foot">
       <button class="btn cancel" onclick="devGoList()">Back</button>
-      <button class="btn primary" ${sum===2?"":"disabled"} onclick="confirmPlenty()">Take 2</button>
+      <button class="btn primary" ${sum===cap&&cap>0?"":"disabled"} onclick="confirmPlenty()">Take ${cap||2}</button>
     </div>`;
 }
 function devPlentyAdjust(r,delta){
   const sum=RES_ORDER.reduce((s,x)=>s+DEV.sel[x],0);
-  if(delta>0&&sum>=2) return;
+  if(delta>0&&(sum>=plentyCap()||DEV.sel[r]>=S.bank[r])) return;
   DEV.sel[r]=Math.max(0,DEV.sel[r]+delta);
   renderDev();
 }
 function confirmPlenty(){
-  const p=S.cur, sum=RES_ORDER.reduce((s,r)=>s+DEV.sel[r],0);
-  if(sum!==2) return;
-  RES_ORDER.forEach(r=>S.players[p].resources[r]+=DEV.sel[r]);
+  const p=S.cur, sum=RES_ORDER.reduce((s,r)=>s+DEV.sel[r],0), cap=plentyCap();
+  if(sum!==cap||cap===0) return;
+  if(RES_ORDER.some(r=>DEV.sel[r]>S.bank[r])) return;          // never draw more than the bank holds
+  RES_ORDER.forEach(r=>{S.players[p].resources[r]+=DEV.sel[r]; S.bank[r]-=DEV.sel[r];});
   S.players[p].dev.plenty--; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(DEV.sel)+".",true);
   DEV=null; $("devOverlay").classList.add("hidden");
@@ -1961,7 +2012,7 @@ function botDiscard(p){
   for(let i=0;i<need;i++){
     let pick=null,best=-1e9;
     RES_ORDER.forEach(r=>{ if(S.players[p].resources[r]>0){ const v=S.players[p].resources[r]*2-keepW[r]; if(v>best){best=v;pick=r;} }});
-    if(pick) S.players[p].resources[pick]--;
+    if(pick){ S.players[p].resources[pick]--; S.bank[pick]++; }
   }
   pushLog(PLAYER_NAMES[p]+" discards "+need+" card"+(need===1?"":"s")+".",true);
 }
@@ -2064,8 +2115,10 @@ function botTradeFor(cost){
   RES_ORDER.forEach(r=>{ if(need[r]) return; const rt=harbourRate(p,r), surplus=S.players[p].resources[r]-(cost[r]||0);
     if(surplus>=rt && rt<rate){ rate=rt; give=r; } });
   if(give==null) return false;
-  const recv=Object.keys(need)[0];
-  S.players[p].resources[give]-=rate; S.players[p].resources[recv]+=1;
+  const recv=Object.keys(need).find(r=>S.bank[r]>=1);   // the bank must actually have what we want
+  if(recv==null) return false;
+  S.players[p].resources[give]-=rate; S.bank[give]+=rate;
+  S.players[p].resources[recv]+=1; S.bank[recv]-=1;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[give].toLowerCase()+" for 1 "+RES_SHORT[recv].toLowerCase()+(rate<4?" at a harbour.":" with the bank."),true);
   recordSnapshot();
   return true;
@@ -2110,19 +2163,33 @@ function botMonopolyBest(p){
   return best;
 }
 function botPlentyPick(p){
+  if(RES_ORDER.reduce((s,r)=>s+S.bank[r],0)===0) return null;     // bank is empty — nothing to take
   const targets=[];
   if(ownCount(p,"city")<LIMIT.city && botMySettlements(p).length) targets.push(COST.city);
   if(ownCount(p,"settlement")<LIMIT.settlement && legalSettlements(p,false).some(v=>spotScore(v,p)>=SETTLE_MIN)) targets.push(COST.settlement);
   if(ownCount(p,"road")<LIMIT.road && botBestRoad(p)!=null) targets.push(COST.road);
   for(const cost of targets){
     const need=[]; Object.keys(cost).forEach(r=>{ let dlt=cost[r]-S.players[p].resources[r]; while(dlt-->0) need.push(r); });
-    if(need.length>=1 && need.length<=2){ while(need.length<2) need.push("ore"); return need.slice(0,2); }
+    if(need.length<1||need.length>2) continue;
+    // the bank must be able to supply the needed multiset
+    const used={}; let ok=true;
+    need.forEach(r=>{ used[r]=(used[r]||0)+1; if(used[r]>S.bank[r]) ok=false; });
+    if(!ok) continue;
+    const picks=need.slice();
+    // pad up to 2 with any resource the bank can still supply
+    while(picks.length<2){
+      const cnt={}; picks.forEach(r=>cnt[r]=(cnt[r]||0)+1);
+      const pad=RES_ORDER.find(r=>(cnt[r]||0)<S.bank[r]);
+      if(pad==null) break;
+      picks.push(pad);
+    }
+    return picks;
   }
   return null;
 }
 function playBotPlenty(two){
   const p=S.cur;
-  two.forEach(r=>S.players[p].resources[r]++);
+  two.forEach(r=>{ S.players[p].resources[r]++; S.bank[r]--; });
   S.players[p].dev.plenty--; S.devPlayedThisTurn=true;
   const tally=zeroRes(); two.forEach(r=>tally[r]++);
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(tally)+".",true);
