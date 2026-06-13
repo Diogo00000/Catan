@@ -306,7 +306,10 @@
   .sw:hover:not(:disabled){transform:scale(1.12);}
   .sw.sel{box-shadow:0 0 0 2px var(--parchment), 0 0 0 4px var(--gold-deep);}
   .sw:disabled{cursor:not-allowed; opacity:.28;}
-  #startBtn{display:block; width:fit-content; margin-left:auto;}
+  .start-row{display:flex; align-items:center; gap:10px;}
+  .start-warn{flex:1 1 auto; min-width:0; text-align:right; font-family:'Outfit',sans-serif;
+    font-size:11px; letter-spacing:.3px; color:#9c3b30; opacity:.85;}
+  #startBtn{display:block; width:fit-content; margin-left:auto; flex:0 0 auto;}
   #startBtn:disabled{opacity:.4; cursor:not-allowed;}
 
   /* ---------- Trade dialog ---------- */
@@ -541,7 +544,10 @@
       </div>
       <div class="seats" id="seats"></div>
       <label class="watch-row"><input type="checkbox" id="watchStart"><span>Auto-watch mode: let every player play itself while I watch.</span></label>
-      <button class="btn primary span2" id="startBtn" onclick="startGame()">Start game</button>
+      <div class="start-row">
+        <span class="start-warn" id="startWarn" role="alert"></span>
+        <button class="btn primary span2" id="startBtn" onclick="startGame()">Start game</button>
+      </div>
     </div>
   </div>
 </div>
@@ -895,7 +901,7 @@ let S=null;
 const $=id=>document.getElementById(id);
 
 /* ---------------- Pre-game setup screen ---------------- */
-const setupState={count:4, players:[]};
+const setupState={count:3, players:[]};
 function firstFreeColor(taken){ return (PALETTE.find(c=>!taken.includes(c.hex))||PALETTE[0]).hex; }
 function defaultSeat(taken,i){ return {name:"Player "+(i+1), color:firstFreeColor(taken), type:"human"}; }
 function ensureSeats(){
@@ -913,7 +919,18 @@ function setupValid(){
   const cols=ps.map(p=>p.color);
   return cols.every(Boolean) && new Set(cols).size===cols.length;
 }
-function refreshStartBtn(){ const b=$("startBtn"); if(b) b.disabled=!setupValid(); }
+function startWarning(){
+  const ps=setupState.players.slice(0,setupState.count);
+  if(!ps.every(p=>p.name.trim().length>0)) return "Every player needs a name.";
+  const names=ps.map(p=>p.name.trim().toLowerCase());
+  if(new Set(names).size!==names.length) return "Player names must be unique.";
+  return "";
+}
+function refreshStartBtn(){
+  const valid=setupValid();
+  const b=$("startBtn"); if(b) b.disabled=!valid;
+  const w=$("startWarn"); if(w) w.textContent=valid?"":startWarning();
+}
 function renderSetup(){
   ensureSeats();
   // player-count buttons
