@@ -281,7 +281,7 @@
 
   /* ---------- Setup screen ---------- */
   .setup{text-align:left;}
-  .setup-row{display:flex; align-items:center; gap:12px; margin-bottom:14px;}
+  .setup-row{display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:14px;}
   .setup-lab{font-family:'Cinzel',serif; font-weight:600; font-size:13px; letter-spacing:2px;
     text-transform:uppercase; color:var(--wood-dark); flex:0 0 auto;}
   .count-btns{display:flex; gap:7px;}
@@ -293,6 +293,7 @@
     color:var(--wood-dark); border-color:var(--gold-deep);}
   .seats{display:flex; flex-direction:column; gap:8px; margin-bottom:16px;}
   .seat{display:flex; align-items:center; gap:9px;}
+  .seat.placeholder{visibility:hidden;}
   .seat-num{font-family:'Cinzel',serif; font-weight:700; font-size:12px; color:var(--ink-soft);
     width:16px; flex:0 0 auto; text-align:right;}
   .seat-name{flex:1 1 auto; min-width:0; font-family:'Outfit',sans-serif; font-size:13px; color:var(--ink);
@@ -305,6 +306,7 @@
   .sw:hover:not(:disabled){transform:scale(1.12);}
   .sw.sel{box-shadow:0 0 0 2px var(--parchment), 0 0 0 4px var(--gold-deep);}
   .sw:disabled{cursor:not-allowed; opacity:.28;}
+  #startBtn{display:block; width:fit-content; margin-left:auto;}
   #startBtn:disabled{opacity:.4; cursor:not-allowed;}
 
   /* ---------- Trade dialog ---------- */
@@ -531,14 +533,14 @@
   <div class="modal" id="modal">
     <h1>CATAN</h1>
     <div class="sub">Settlers of the Island</div>
-    <p>Collect wood, brick, sheep, wheat and ore. Build settlements and roads, upgrade to cities, and race to <strong>10 victory points</strong>. Played hot-seat — pass the screen between turns.</p>
+    <p>Collect wood, brick, sheep, wheat and ore. Build settlements and roads, upgrade to cities, buy development cards and race to <strong>10 victory points</strong>.</p>
     <div class="setup" id="setup">
       <div class="setup-row">
         <span class="setup-lab">Players</span>
         <div class="count-btns" id="countBtns"></div>
       </div>
       <div class="seats" id="seats"></div>
-      <label class="watch-row"><input type="checkbox" id="watchStart"><span>Auto-watch mode — let every seat play itself while I watch</span></label>
+      <label class="watch-row"><input type="checkbox" id="watchStart"><span>Auto-watch mode: let every player play itself while I watch.</span></label>
       <button class="btn primary span2" id="startBtn" onclick="startGame()">Start game</button>
     </div>
   </div>
@@ -905,6 +907,9 @@ function setupValid(){
   const ps=setupState.players.slice(0,setupState.count);
   if(ps.length<3||ps.length>6) return false;
   if(!ps.every(p=>p.name.trim().length>0)) return false;
+  // names must be distinct (case-insensitive, surrounding spaces ignored)
+  const names=ps.map(p=>p.name.trim().toLowerCase());
+  if(new Set(names).size!==names.length) return false;
   const cols=ps.map(p=>p.color);
   return cols.every(Boolean) && new Set(cols).size===cols.length;
 }
@@ -948,6 +953,23 @@ function renderSetup(){
     row.appendChild(num); row.appendChild(inp); row.appendChild(sws);
     seats.appendChild(row);
   });
+  // reserve the height of a full 6-player roster: fill the remaining slots with
+  // invisible placeholder rows so the window keeps a fixed size at any count
+  for(let i=setupState.count;i<6;i++){
+    const row=document.createElement("div"); row.className="seat placeholder";
+    row.setAttribute("aria-hidden","true");
+    const num=document.createElement("span"); num.className="seat-num"; num.textContent=(i+1);
+    const inp=document.createElement("input");
+    inp.className="seat-name"; inp.type="text"; inp.tabIndex=-1; inp.disabled=true;
+    const sws=document.createElement("div"); sws.className="swatches";
+    PALETTE.forEach(c=>{
+      const sw=document.createElement("button");
+      sw.className="sw"; sw.style.background=c.hex; sw.tabIndex=-1; sw.disabled=true;
+      sws.appendChild(sw);
+    });
+    row.appendChild(num); row.appendChild(inp); row.appendChild(sws);
+    seats.appendChild(row);
+  }
   refreshStartBtn();
 }
 
