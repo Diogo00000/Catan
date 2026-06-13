@@ -57,6 +57,24 @@
   @media (prefers-reduced-motion: no-preference){
     .pulse{animation:pulse 1.25s ease-in-out infinite;}
     @keyframes pulse{0%,100%{opacity:.55;} 50%{opacity:1;}}
+    /* ---- Final-polish animations (quick, non-blocking) ---- */
+    .dice.rolling .die{animation:diceTumble .4s ease;}
+    @keyframes diceTumble{
+      0%{transform:translateY(0) rotate(0);}
+      20%{transform:translateY(-3px) rotate(-13deg);}
+      45%{transform:translateY(1px) rotate(11deg);}
+      70%{transform:translateY(-1px) rotate(-6deg);}
+      100%{transform:translateY(0) rotate(0);}
+    }
+    .piece-pop{animation:piecePop .28s cubic-bezier(.34,1.56,.64,1); transform-box:fill-box; transform-origin:center bottom;}
+    @keyframes piecePop{0%{transform:scale(0);} 70%{transform:scale(1.15);} 100%{transform:scale(1);}}
+    .road-draw{stroke-dasharray:48; animation:roadDraw .3s ease-out;}
+    @keyframes roadDraw{from{stroke-dashoffset:48;} to{stroke-dashoffset:0;}}
+    .robber-slide{transition:transform .35s ease;}
+    .chip.bump{animation:chipBump .35s ease;}
+    @keyframes chipBump{0%{transform:scale(1);} 35%{transform:scale(1.26);} 100%{transform:scale(1);}}
+    #gameOverModal.ease-in{animation:sbIn .4s cubic-bezier(.2,.8,.3,1);}
+    @keyframes sbIn{0%{opacity:0; transform:translateY(16px) scale(.97);} 100%{opacity:1; transform:none;}}
   }
   .compass text{font-family:'Cinzel',serif; fill:rgba(224,184,74,.7); font-size:11px; text-anchor:middle; dominant-baseline:central;}
 
@@ -392,8 +410,14 @@
   .sb-stats-wrap .stats-block{margin-bottom:12px;}
   .sb-footer{text-align:center;padding-top:16px;border-top:1px solid rgba(107,79,46,.16);margin-top:8px;}
 
+  /* ---------- Sound controls ---------- */
+  .head-btns{display:flex; gap:8px; flex:0 0 auto; align-items:center;}
+  #soundBtn{font-size:15px; line-height:1; padding:7px 9px;}
+  #soundBtn.muted{color:#9c3b30; border-color:rgba(156,59,48,.55); background:rgba(156,59,48,.10); opacity:.95;}
+  .vol-slider{width:64px; height:4px; accent-color:var(--wood); cursor:pointer; flex:0 0 auto;}
+  .vol-slider:disabled{opacity:.35; cursor:default;}
+
   /* ---------- Rules / How-to-play panel ---------- */
-  .head-btns{display:flex; gap:8px; flex:0 0 auto;}
   .rules-modal{max-width:780px; width:min(94vw,780px); max-height:88vh; overflow-y:auto;
     text-align:left; padding:26px 30px 22px; position:relative;}
   .rules-modal .sb-sub{margin-bottom:20px;}
@@ -429,6 +453,8 @@
     <div class="panel-head">
       <h1 class="title">CATAN<span class="small">Pass &amp; Play Island</span></h1>
       <div class="head-btns">
+        <button class="btn-ghost" id="soundBtn" title="Sound on/off" aria-label="Toggle sound">🔊</button>
+        <input type="range" id="volSlider" class="vol-slider" min="0" max="100" value="60" title="Volume" aria-label="Volume">
         <button class="btn-ghost" id="rulesBtn">Rules</button>
         <button class="btn-ghost" id="newGameBtn">New game</button>
       </div>
@@ -683,6 +709,86 @@ const COST={
 };
 const LIMIT={settlement:5,city:4,road:15};
 
+/* ================= SOUND & ANIMATION (final polish) =================
+   Sounds are synthesised live with the Web Audio API — no external files, so the
+   game stays one self-contained page. Animations are short and CSS-driven; both
+   honour prefers-reduced-motion and never block or delay game logic. */
+const RM = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : {matches:false};
+function reduceMotion(){ return !!RM.matches; }
+
+// Transient hints set by an action just before renderAll(), consumed once during render.
+const FX={ diceRoll:false, newBuilding:null, newRoad:null, robberFrom:null, prevRes:null };
+
+const SFX=(function(){
+  let ctx=null, master=null, muted=false, vol=0.6, busyUntil=0;
+  try{
+    const sv=localStorage.getItem("catanSound"); if(sv!=null) muted=(sv==="off");
+    const vv=localStorage.getItem("catanVol");   if(vv!=null) vol=Math.max(0,Math.min(1,parseFloat(vv)||0));
+  }catch(e){}
+  function ensure(){
+    if(ctx) return ctx;
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return null;
+      ctx=new AC();
+      master=ctx.createGain(); master.gain.value=vol; master.connect(ctx.destination);
+    }catch(e){ ctx=null; }
+    return ctx;
+  }
+  function unlock(){ if(ensure()&&ctx.state==="suspended") ctx.resume(); }
+  function tone(t0,o){
+    const osc=ctx.createOscillator(), g=ctx.createGain();
+    osc.type=o.type||"sine"; osc.frequency.setValueAtTime(o.freq,t0);
+    if(o.freq2) osc.frequency.exponentialRampToValueAtTime(Math.max(1,o.freq2),t0+o.dur);
+    const gain=o.gain==null?0.3:o.gain, atk=o.attack==null?0.008:o.attack;
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.linearRampToValueAtTime(gain,t0+atk);
+    g.gain.exponentialRampToValueAtTime(0.0008,t0+o.dur);
+    osc.connect(g); g.connect(master); osc.start(t0); osc.stop(t0+o.dur+0.03);
+  }
+  function noise(t0,o){
+    const dur=o.dur, len=Math.max(1,Math.floor(ctx.sampleRate*dur));
+    const buf=ctx.createBuffer(1,len,ctx.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
+    const src=ctx.createBufferSource(); src.buffer=buf;
+    const f=ctx.createBiquadFilter(); f.type=o.ftype||"lowpass"; f.frequency.value=o.freq||1200;
+    const g=ctx.createGain(); g.gain.value=o.gain==null?0.25:o.gain;
+    src.connect(f); f.connect(g); g.connect(master); src.start(t0);
+  }
+  // Each cue schedules a short voice and returns its approximate audible length.
+  const CUES={
+    roll:n=>{ noise(n,{dur:0.05,gain:0.16,freq:2400,ftype:"bandpass"}); noise(n+0.06,{dur:0.05,gain:0.14,freq:1900,ftype:"bandpass"}); tone(n+0.12,{freq:520,freq2:380,dur:0.12,type:"triangle",gain:0.24}); return 0.22; },
+    roll7:n=>{ tone(n,{freq:300,freq2:150,dur:0.32,type:"sawtooth",gain:0.26}); tone(n+0.02,{freq:150,freq2:88,dur:0.34,type:"sine",gain:0.22}); return 0.36; },
+    road:n=>{ noise(n,{dur:0.09,gain:0.18,freq:900,ftype:"lowpass"}); tone(n,{freq:240,freq2:200,dur:0.1,type:"triangle",gain:0.18}); return 0.12; },
+    settlement:n=>{ tone(n,{freq:523,dur:0.12,type:"triangle",gain:0.26}); tone(n+0.09,{freq:784,dur:0.16,type:"triangle",gain:0.26}); return 0.22; },
+    city:n=>{ tone(n,{freq:523,dur:0.14,type:"triangle",gain:0.24}); tone(n+0.08,{freq:659,dur:0.14,type:"triangle",gain:0.24}); tone(n+0.16,{freq:1047,dur:0.2,type:"triangle",gain:0.26}); return 0.3; },
+    collect:n=>{ tone(n,{freq:880,dur:0.08,type:"sine",gain:0.18}); tone(n+0.07,{freq:1175,dur:0.1,type:"sine",gain:0.18}); return 0.16; },
+    robber:n=>{ tone(n,{freq:220,freq2:130,dur:0.2,type:"sawtooth",gain:0.2}); return 0.2; },
+    steal:n=>{ tone(n,{freq:300,freq2:600,dur:0.08,type:"square",gain:0.13}); tone(n+0.07,{freq:520,freq2:260,dur:0.12,type:"triangle",gain:0.18}); return 0.18; },
+    trade:n=>{ tone(n,{freq:660,dur:0.1,type:"sine",gain:0.2}); tone(n+0.09,{freq:990,dur:0.12,type:"sine",gain:0.2}); return 0.2; },
+    dev:n=>{ noise(n,{dur:0.07,gain:0.14,freq:3000,ftype:"highpass"}); tone(n+0.04,{freq:587,dur:0.12,type:"triangle",gain:0.2}); return 0.16; },
+    win:n=>{ [523,659,784,1047].forEach((f,i)=>tone(n+i*0.12,{freq:f,dur:0.26,type:"triangle",gain:0.28})); tone(n+0.48,{freq:1568,dur:0.4,type:"triangle",gain:0.28}); return 0.9; }
+  };
+  function play(name,delay){
+    if(muted) return;
+    if(!ensure()) return;
+    unlock();
+    const fire=()=>{
+      const now=ctx.currentTime;
+      if(now<busyUntil) return;             // a cue is still sounding — skip rather than stack into noise
+      const dur=(CUES[name]||(()=>0.15))(now);
+      busyUntil=now+Math.min(dur,0.5);      // cap the reserve so back-to-back distinct cues aren't all dropped
+    };
+    if(delay>0) setTimeout(fire,delay); else fire();
+  }
+  return {
+    play, unlock,
+    isMuted:()=>muted,
+    getVolume:()=>vol,
+    toggleMute(){ muted=!muted; try{localStorage.setItem("catanSound",muted?"off":"on");}catch(e){} },
+    setVolume(v){ vol=Math.max(0,Math.min(1,v)); if(master) master.gain.value=vol; try{localStorage.setItem("catanVol",String(vol));}catch(e){} }
+  };
+})();
+
 /* ---------------- Board geometry ---------------- */
 const R=48, W=Math.sqrt(3)*R, VD=1.5*R, CX0=300, CY0=295;
 const COUNTS_SMALL=[3,4,5,4,3];        // 19-hex board (3-4 players)
@@ -909,6 +1015,8 @@ function startGame(){
   S.settlementsPlaced=Array(n).fill(0);
 
   $("overlay").classList.add("hidden");
+  FX.prevRes=null; FX.newBuilding=null; FX.newRoad=null; FX.robberFrom=null; FX.diceRoll=false;
+  SFX.unlock();                          // the Start click is a user gesture — wake audio now
   drawStaticBoard();
   beginSetupTurn();
   recordSnapshot("Game begins — place your first settlement.");   // starting frame for the scrubber
@@ -1046,6 +1154,7 @@ function commitSettlement(vid){
     }
     S.lastSetupV=vid; S.mode="setupRoad";
     updateLongestRoad(); recomputeVP();
+    FX.newBuilding=vid; SFX.play("settlement");
     recordSnapshot(PLAYER_NAMES[S.cur]+" places a settlement.");
     renderAll();
     return;
@@ -1054,12 +1163,14 @@ function commitSettlement(vid){
   pay(S.cur,COST.settlement);
   S.buildings[vid]={player:S.cur,type:"settlement"};
   pushLog(PLAYER_NAMES[S.cur]+" builds a settlement.",true);
+  FX.newBuilding=vid; SFX.play("settlement");
   S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); recordSnapshot(); renderAll();
 }
 function commitRoad(eid){
   if(S.phase==="setup"){
     S.roads[eid]=S.cur;
     updateLongestRoad();
+    FX.newRoad=eid; SFX.play("road");
     recordSnapshot(PLAYER_NAMES[S.cur]+" places a road.");
     S.setupIdx++;
     if(S.setupIdx<S.setupQueue.length){ beginSetupTurn(); }
@@ -1074,6 +1185,7 @@ function commitRoad(eid){
   if(S.mode==="roadBuild"){           // free roads from a Road Building card
     S.roads[eid]=S.cur; S.freeRoadsLeft--;
     pushLog(PLAYER_NAMES[S.cur]+" builds a free road.",true);
+    FX.newRoad=eid; SFX.play("road");
     updateLongestRoad(); recomputeVP(); checkWin();
     if(S.phase==="over"){ S.mode=null; recordSnapshot(); renderAll(); return; }
     if(!(S.freeRoadsLeft>0 && ownCount(S.cur,"road")<LIMIT.road && legalRoads(S.cur,false,null).length>0)) S.mode=null;
@@ -1084,15 +1196,18 @@ function commitRoad(eid){
   pay(S.cur,COST.road);
   S.roads[eid]=S.cur;
   pushLog(PLAYER_NAMES[S.cur]+" builds a road.",true);
+  FX.newRoad=eid; SFX.play("road");
   S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); recordSnapshot(); renderAll();
 }
 function commitCity(vid){
   pay(S.cur,COST.city);
   S.buildings[vid].type="city";
   pushLog(PLAYER_NAMES[S.cur]+" upgrades to a city.",true);
+  FX.newBuilding=vid; SFX.play("city");
   S.mode=null; recomputeVP(); checkWin(); recordSnapshot(); renderAll();
 }
 function commitRobber(hi){
+  FX.robberFrom=S.robberHex;               // remember where it slides from
   S.robberHex=hi; S.mode=null;
   S.players[S.cur].robberMoves++;          // live stats: a robber move (from a 7 or a Knight)
   // Opponents with a settlement or city touching the new hex are eligible to be robbed.
@@ -1108,6 +1223,7 @@ function commitRobber(hi){
 }
 function finishRobber(victim){
   S.pendingRobber=false; S.mode=null; S.stealChoices=null;
+  let stole=false;
   if(victim==null){
     pushLog(PLAYER_NAMES[S.cur]+" moves the robber. No one to steal from here.",true);
   } else {
@@ -1119,9 +1235,11 @@ function finishRobber(victim){
       S.players[victim].resources[r]--; S.players[S.cur].resources[r]++;
       S.players[S.cur].lifetimeRes++;                  // a stolen card is a card gained
       S.players[S.cur].cardsStolen++; S.players[victim].cardsStolenFrom++;
+      stole=true;
       pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[victim]+".",true);
     }
   }
+  SFX.play(stole?"steal":"robber");
   recordSnapshot();
   renderAll();
 }
@@ -1132,10 +1250,12 @@ function rollDice(){
   const d1=1+Math.floor(Math.random()*6), d2=1+Math.floor(Math.random()*6);
   S.dice=[d1,d2]; S.hasRolled=true;
   const sum=d1+d2;
+  FX.diceRoll=true;
   S.rollCounts[sum]++;                 // live stats: roll-frequency histogram
   // live stats: every roll, accrue each player's expected production (their board pips / 36)
   for(let i=0;i<S.nPlayers;i++) S.players[i].expProd+=expectedPips(i)/36;
   if(sum===7){
+    SFX.play("roll7");
     // A 7: first everyone over the hand limit discards, THEN the robber moves.
     S.pendingRobber=true; S.mode=null;
     pushLog(PLAYER_NAMES[S.cur]+" rolled a 7.",true);
@@ -1184,6 +1304,8 @@ function rollDice(){
     let msg="Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production.");
     if(short.length) msg+=" — bank short on "+short.join(", ")+".";
     pushLog(msg,true);
+    SFX.play("roll");
+    if(parts.length) SFX.play("collect",280);    // a soft tick after the dice settle, when anyone produced
   }
   recordSnapshot();
   renderAll();
@@ -1216,6 +1338,7 @@ function checkWin(){
     const vpc=S.players[S.cur].dev.vp;
     pushLog(PLAYER_NAMES[S.cur]+" reaches "+S.players[S.cur].vp+" VP and wins!"+
       (vpc?` Reveals ${vpc} Victory Point card${vpc>1?"s":""}.`:""),true);
+    SFX.play("win");
     showGameOverScoreboard();
   }
 }
@@ -1393,37 +1516,53 @@ function drawTokens(){
     t.textContent=h.number;
   });
 }
-function pieceSettlement(x,y,color){
+function pieceSettlement(x,y,color,pop){
   const g=el("g",{transform:`translate(${x},${y})`});
-  el("path",{d:"M0,-9 L8,-2 L8,8 L-8,8 L-8,-2 Z",fill:color,class:"piece"},g);
+  // pop class goes on the path (transform-box:fill-box) so the scale never disturbs the group's position
+  el("path",{d:"M0,-9 L8,-2 L8,8 L-8,8 L-8,-2 Z",fill:color,class:"piece"+(pop?" piece-pop":"")},g);
   return g;
 }
-function pieceCity(x,y,color){
+function pieceCity(x,y,color,pop){
   const g=el("g",{transform:`translate(${x},${y})`});
-  el("path",{d:"M-11,9 L-11,-1 L-3,-1 L-3,-6 L4,-11 L11,-6 L11,9 Z",fill:color,class:"piece"},g);
+  el("path",{d:"M-11,9 L-11,-1 L-3,-1 L-3,-6 L4,-11 L11,-6 L11,9 Z",fill:color,class:"piece"+(pop?" piece-pop":"")},g);
   el("rect",{x:-8,y:1,width:5,height:5,fill:"rgba(0,0,0,.20)"},g);
   return g;
 }
 function renderPieces(){
   layers.robber.innerHTML=""; layers.roads.innerHTML=""; layers.buildings.innerHTML="";
+  const animate=!reduceMotion()&&!REPLAY.viewing;
   // robber
-  const rh=hexes[S.robberHex];
-  const rg=el("g",{transform:`translate(${rh.cx},${rh.cy+24})`},layers.robber);
+  const rh=hexes[S.robberHex], rx=rh.cx, ry=rh.cy+24;
+  const rg=el("g",{},layers.robber);
   el("ellipse",{cx:0,cy:9,rx:9,ry:4,fill:"rgba(0,0,0,.30)"},rg);
   el("path",{d:"M-7,9 C-7,2 -5,-1 -4,-4 C-7,-6 -6,-12 0,-12 C6,-12 7,-6 4,-4 C5,-1 7,2 7,9 Z",fill:"var(--robber)",stroke:"#000","stroke-width":1},rg);
+  if(animate && FX.robberFrom!=null && FX.robberFrom!==S.robberHex){
+    const from=hexes[FX.robberFrom];
+    rg.style.transform=`translate(${from.cx}px,${from.cy+24}px)`;
+    rg.classList.add("robber-slide");
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{ rg.style.transform=`translate(${rx}px,${ry}px)`; }));
+  } else {
+    rg.setAttribute("transform",`translate(${rx},${ry})`);
+  }
+  FX.robberFrom=null;
   // roads
   for(const eid in S.roads){
     const e=edges[eid], a=vertices[e.v1], b=vertices[e.v2];
     const ix=a.x+(b.x-a.x)*0.18, iy=a.y+(b.y-a.y)*0.18, jx=b.x-(b.x-a.x)*0.18, jy=b.y-(b.y-a.y)*0.18;
-    el("line",{x1:ix,y1:iy,x2:jx,y2:jy,stroke:"var(--wood-dark)",["stroke-width"]:9,class:"road-line"},layers.roads);
-    el("line",{x1:ix,y1:iy,x2:jx,y2:jy,stroke:PLAYER_COLORS[S.roads[eid]],["stroke-width"]:6,class:"road-line"},layers.roads);
+    const isNew=animate && String(eid)===String(FX.newRoad);
+    const cls="road-line"+(isNew?" road-draw":"");
+    el("line",{x1:ix,y1:iy,x2:jx,y2:jy,stroke:"var(--wood-dark)",["stroke-width"]:9,class:cls},layers.roads);
+    el("line",{x1:ix,y1:iy,x2:jx,y2:jy,stroke:PLAYER_COLORS[S.roads[eid]],["stroke-width"]:6,class:cls},layers.roads);
   }
+  FX.newRoad=null;
   // buildings
   for(const vid in S.buildings){
     const b=S.buildings[vid], v=vertices[vid];
-    const g=b.type==="city"?pieceCity(v.x,v.y,PLAYER_COLORS[b.player]):pieceSettlement(v.x,v.y,PLAYER_COLORS[b.player]);
+    const pop=animate && String(vid)===String(FX.newBuilding);
+    const g=b.type==="city"?pieceCity(v.x,v.y,PLAYER_COLORS[b.player],pop):pieceSettlement(v.x,v.y,PLAYER_COLORS[b.player],pop);
     layers.buildings.appendChild(g);
   }
+  FX.newBuilding=null;
 }
 function renderInteract(){
   layers.interact.innerHTML="";
@@ -1465,17 +1604,26 @@ function diceHTML(n){
   let s="";for(let i=0;i<9;i++)s+=`<span class="pip ${n&&map[n].includes(i)?"on":""}"></span>`;return `<div class="die">${s}</div>`;
 }
 function renderDice(){
-  $("dice").innerHTML=diceHTML(S.dice[0])+diceHTML(S.dice[1]);
+  const d=$("dice");
+  d.innerHTML=diceHTML(S.dice[0])+diceHTML(S.dice[1]);
   const sum=(S.dice[0]&&S.dice[1])?S.dice[0]+S.dice[1]:null;
   $("sum").innerHTML=(sum?sum:"–")+"<small>"+(sum?"Rolled":"Roll")+"</small>";
+  if(FX.diceRoll && !reduceMotion() && !REPLAY.viewing){
+    d.classList.remove("rolling"); void d.offsetWidth; d.classList.add("rolling");   // restart the tumble
+  }
+  FX.diceRoll=false;
 }
 function renderPlayers(){
   const box=$("players"); box.innerHTML="";
+  const bumpOk=!reduceMotion()&&!REPLAY.viewing&&FX.prevRes;
   S.players.forEach(pl=>{
     const active=(pl.i===S.cur);
     const card=document.createElement("div"); card.className="pcard"+(active?" active":"");
     let chips="";
-    RES_ORDER.forEach(r=>{chips+=`<span class="chip" style="background:${TILE_COLORS[r]};${r==='sheep'||r==='wheat'?'color:#3a2e10;':''}"><span class="c-lab">${RES_SHORT[r]}</span>${pl.resources[r]}</span>`;});
+    const prev=FX.prevRes?FX.prevRes[pl.i]:null;
+    RES_ORDER.forEach(r=>{
+      const inc=bumpOk&&prev&&pl.resources[r]>prev[r];     // tick up only when a count actually grew
+      chips+=`<span class="chip${inc?" bump":""}" style="background:${TILE_COLORS[r]};${r==='sheep'||r==='wheat'?'color:#3a2e10;':''}"><span class="c-lab">${RES_SHORT[r]}</span>${pl.resources[r]}</span>`;});
     let hbHtml="";
     const hs=playerHarbours(pl.i);
     if(hs.length){
@@ -1507,6 +1655,8 @@ function renderPlayers(){
       </div>`;
     box.appendChild(card);
   });
+  // Remember the live counts so the next render can detect (and bump) increases.
+  if(!REPLAY.viewing) FX.prevRes=S.players.map(pl=>Object.assign({},pl.resources));
 }
 function renderPrompt(){
   const pr=$("prompt"); let t="";
@@ -1921,6 +2071,7 @@ function doMaritimeTrade(harbour){
   if(harbour) S.players[p].tradesHarbour++; else S.players[p].tradesBank++;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[g].toLowerCase()+" for 1 "+RES_SHORT[rc].toLowerCase()+
     (harbour?" at a harbour ("+rate+":1).":" with the bank (4:1)."),true);
+  SFX.play("trade");
   recordSnapshot();
   closeTrade();
 }
@@ -2012,6 +2163,7 @@ function tradeRespond(accept){
   S.players[q].lifetimeRes+=RES_ORDER.reduce((s,r)=>s+TRADE.give[r],0);
   S.players[p].tradesPlayer++; S.players[q].tradesPlayer++;
   pushLog(PLAYER_NAMES[p]+" and "+PLAYER_NAMES[q]+" trade — "+PLAYER_NAMES[p]+" gives "+resList(TRADE.give)+", gets "+resList(TRADE.receive)+".",true);
+  SFX.play("trade");
   recordSnapshot();
   closeTrade();
 }
@@ -2108,6 +2260,7 @@ function buyDev(){
   const card=S.deck.shift();                 // drawn from the top, hidden from opponents
   S.players[p].dev[card]++; S.players[p].devNew[card]++; S.players[p].devBought++;
   pushLog(PLAYER_NAMES[p]+" buys a development card.",true);
+  SFX.play("dev");
   recomputeVP(); checkWin(); recordSnapshot(); renderAll();     // a bought VP card can win immediately
 }
 
@@ -2159,6 +2312,7 @@ function devPlayKnight(){
   if(S.phase==="over"){ recordSnapshot(); renderAll(); return; }
   S.mode="robber";                              // robber move with no discard step
   pushLog(PLAYER_NAMES[p]+" plays a Knight.",true);
+  SFX.play("dev");
   recordSnapshot();
   renderAll();
 }
@@ -2169,6 +2323,7 @@ function devPlayRoad(){
   S.freeRoadsLeft=2; S.mode="roadBuild";
   DEV=null; $("devOverlay").classList.add("hidden");
   pushLog(PLAYER_NAMES[p]+" plays Road Building — place 2 free roads.",true);
+  SFX.play("dev");
   recordSnapshot();
   renderAll();
 }
@@ -2221,6 +2376,7 @@ function confirmPlenty(){
   S.players[p].lifetimeRes+=sum;
   S.players[p].dev.plenty--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(DEV.sel)+".",true);
+  SFX.play("dev");
   DEV=null; $("devOverlay").classList.add("hidden");
   recomputeVP(); recordSnapshot(); renderAll();
 }
@@ -2245,6 +2401,7 @@ function confirmMono(){
   S.players[p].lifetimeRes+=total;
   S.players[p].dev.mono--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[r].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
+  SFX.play("dev");
   DEV=null; $("devOverlay").classList.add("hidden");
   recomputeVP(); recordSnapshot(); renderAll();
 }
@@ -2554,6 +2711,7 @@ function botTradeFor(cost){
   S.players[p].lifetimeRes+=1;
   if(rate<4) S.players[p].tradesHarbour++; else S.players[p].tradesBank++;
   pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[give].toLowerCase()+" for 1 "+RES_SHORT[recv].toLowerCase()+(rate<4?" at a harbour.":" with the bank."),true);
+  SFX.play("trade");
   recordSnapshot();
   return true;
 }
@@ -2627,6 +2785,7 @@ function playBotPlenty(two){
   S.players[p].dev.plenty--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   const tally=zeroRes(); two.forEach(r=>tally[r]++);
   pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(tally)+".",true);
+  SFX.play("dev");
   recomputeVP(); recordSnapshot(); renderAll();
 }
 function playBotMonopoly(res){
@@ -2636,6 +2795,7 @@ function playBotMonopoly(res){
   S.players[p].lifetimeRes+=total;
   S.players[p].dev.mono--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[res].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
+  SFX.play("dev");
   recomputeVP(); recordSnapshot(); renderAll();
 }
 
@@ -2644,6 +2804,7 @@ function showGameOverScoreboard(){
   const m=$("gameOverModal");
   m.innerHTML=gameOverHTML();
   $("gameOverOverlay").classList.remove("hidden");
+  if(!reduceMotion()){ m.classList.remove("ease-in"); void m.offsetWidth; m.classList.add("ease-in"); }
 }
 function closeGameOver(){
   $("gameOverOverlay").classList.add("hidden");
@@ -2753,6 +2914,20 @@ $("replayNext").addEventListener("click",()=>enterReplay(replayCurrentIndex()+1)
 $("replayPlay").addEventListener("click",toggleReplayPlay);
 $("replayLive").addEventListener("click",returnToPresent);
 document.querySelectorAll(".rspd").forEach(b=>b.addEventListener("click",()=>{ REPLAY.speed=+b.dataset.ms; renderReplayBar(); if(REPLAY.playing) replayTick(); }));
+// ---- Sound controls ----
+const soundBtn=$("soundBtn"), volSlider=$("volSlider");
+function refreshSoundUI(){
+  const m=SFX.isMuted();
+  soundBtn.textContent=m?"🔇":"🔊";
+  soundBtn.classList.toggle("muted",m);
+  volSlider.value=Math.round(SFX.getVolume()*100);
+  volSlider.disabled=m;
+}
+soundBtn.addEventListener("click",()=>{ SFX.unlock(); SFX.toggleMute(); refreshSoundUI(); if(!SFX.isMuted()) SFX.play("settlement"); });
+volSlider.addEventListener("input",()=>{ SFX.setVolume((+volSlider.value)/100); });
+refreshSoundUI();
+// Browsers gate audio behind a user gesture — wake the context on the first interaction.
+["pointerdown","keydown","touchstart"].forEach(ev=>document.addEventListener(ev,()=>SFX.unlock(),{once:true}));
 buildGeometry();
 // draw an idle board behind the start overlay
 assignTiles();
