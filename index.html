@@ -347,6 +347,50 @@
     .wrap{flex-direction:column;}
     .panel{flex:1 1 auto; width:100%;}
   }
+
+  /* ---------- Game-Over Scoreboard ---------- */
+  .sb-modal{max-width:900px;width:min(94vw,900px);max-height:88vh;overflow-y:auto;
+    text-align:left;padding:28px 30px 24px;}
+  .sb-title{font-family:'Cinzel',serif;font-weight:700;letter-spacing:5px;font-size:30px;
+    margin:0 0 2px;color:var(--wood-dark);text-align:center;}
+  .sb-sub{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--ink-soft);
+    text-align:center;margin-bottom:22px;}
+  .sb-h{font-family:'Cinzel',serif;font-weight:700;letter-spacing:2px;font-size:16px;
+    color:var(--wood-dark);text-transform:uppercase;margin:22px 0 12px;
+    padding-bottom:7px;border-bottom:1px solid var(--parchment-edge);}
+  .sb-h:first-of-type{margin-top:0;}
+  .sb-rank-list{display:flex;flex-direction:column;gap:8px;margin-bottom:4px;}
+  .sb-rank-row{display:flex;align-items:center;gap:12px;padding:10px 14px;
+    border-radius:10px;border:1px solid rgba(107,79,46,.18);background:rgba(255,255,255,.3);}
+  .sb-rank-row.sb-winner{border-color:var(--gold-deep);background:rgba(224,184,74,.18);
+    box-shadow:0 0 0 1.5px var(--gold-deep) inset;}
+  .sb-rank-num{font-family:'Cinzel',serif;font-weight:700;font-size:18px;color:var(--ink-soft);
+    width:30px;text-align:center;flex:0 0 auto;}
+  .sb-rank-row.sb-winner .sb-rank-num{color:var(--gold-deep);}
+  .sb-rank-info{flex:1 1 auto;display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .sb-rank-name-row{display:flex;align-items:center;gap:8px;}
+  .sb-rank-name{font-weight:700;font-size:14px;}
+  .sb-vp-breakdown{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+  .sb-vp-chip{font-size:10.5px;padding:2px 7px;border-radius:10px;
+    background:rgba(107,79,46,.10);border:1px solid rgba(107,79,46,.15);color:var(--ink-soft);}
+  .sb-vp-chip.special{background:rgba(107,79,46,.18);color:var(--wood-dark);font-weight:600;}
+  .sb-vp-chip.vp-card{background:rgba(224,184,74,.3);border-color:var(--gold-deep);
+    color:var(--wood-dark);font-weight:700;}
+  .sb-vp-total{font-family:'Cinzel',serif;font-weight:700;font-size:22px;color:var(--wood-dark);
+    background:rgba(107,79,46,.12);border-radius:20px;padding:4px 16px;flex:0 0 auto;white-space:nowrap;}
+  .sb-rank-row.sb-winner .sb-vp-total{
+    background:linear-gradient(180deg,var(--gold),var(--gold-deep));color:var(--wood-dark);}
+  .sb-awards-grid{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:4px;}
+  .sb-award-card{display:flex;flex-direction:column;gap:3px;padding:11px 14px;
+    border-radius:10px;border:1px solid rgba(107,79,46,.18);background:rgba(255,255,255,.3);
+    flex:1 1 140px;min-width:140px;}
+  .sb-award-icon{font-size:20px;margin-bottom:2px;}
+  .sb-award-label{font-family:'Cinzel',serif;font-weight:700;font-size:10px;letter-spacing:1px;
+    text-transform:uppercase;color:var(--wood-dark);}
+  .sb-award-who{font-size:13px;font-weight:600;color:var(--ink);}
+  .sb-award-detail{font-size:10.5px;color:var(--ink-soft);}
+  .sb-stats-wrap .stats-block{margin-bottom:12px;}
+  .sb-footer{text-align:center;padding-top:16px;border-top:1px solid rgba(107,79,46,.16);margin-top:8px;}
 </style>
 </head>
 <body>
@@ -471,6 +515,11 @@
 <!-- Play development card dialog -->
 <div class="overlay hidden" id="devOverlay">
   <div class="modal trade-modal" id="devModal"></div>
+</div>
+
+<!-- Game-over scoreboard -->
+<div class="overlay hidden" id="gameOverOverlay">
+  <div class="modal sb-modal" id="gameOverModal"></div>
 </div>
 
 <script>
@@ -1031,6 +1080,7 @@ function declareStalemate(){
   S.players.forEach(p=>{ const v=p.vp*1000+totalCards(p.i); if(v>bv){bv=v;w=p.i;} });
   S.phase="over"; S.winner=w; S.mode=null; S.pendingRobber=false;
   pushLog("Stalemate — the board is locked and no one can reach 10. "+PLAYER_NAMES[w]+" wins on points ("+S.players[w].vp+" VP).",true);
+  showGameOverScoreboard();
 }
 function checkWin(){
   if(S.phase==="over") return;
@@ -1039,6 +1089,7 @@ function checkWin(){
     const vpc=S.players[S.cur].dev.vp;
     pushLog(PLAYER_NAMES[S.cur]+" reaches "+S.players[S.cur].vp+" VP and wins!"+
       (vpc?` Reveals ${vpc} Victory Point card${vpc>1?"s":""}.`:""),true);
+    showGameOverScoreboard();
   }
 }
 // True when the current player may take a turn action (buy/build/trade) — these need the roll done first.
@@ -1473,13 +1524,14 @@ function prodStatsHTML(){
 }
 // A small key/value line inside a player stat card.
 function pstatRow(k,v,cls){ return `<div class="pstat-row"><span class="pr-k">${k}</span><span class="pr-v${cls?(" "+cls):""}">${v}</span></div>`; }
-function playerStatsHTML(){
+function playerStatsHTML(final=false){
   const cards=S.players.map(pl=>{
     const i=pl.i;
     const settle=ownCount(i,"settlement"), city=ownCount(i,"city"), roads=ownCount(i,"road");
     const lrVP=(S.longestRoad===i)?2:0, laVP=(S.largestArmy===i)?2:0;
-    // Public VP only — hidden Victory Point dev cards stay secret until the final scoreboard.
+    const vpCards=final?pl.dev.vp:0;
     const pubVP=settle*1+city*2+lrVP+laVP;
+    const dispVP=pubVP+vpCards;
     const held=Object.values(pl.dev).reduce((a,b)=>a+b,0);   // total dev cards in hand (incl. hidden VP)
     const inHand=totalCards(i);
     const actual=RES_ORDER.reduce((s,r)=>s+S.playerProduction[i][r],0);
@@ -1489,12 +1541,13 @@ function playerStatsHTML(){
       pstatRow("Settlements",settle,settle?"":"muted")+
       pstatRow("Cities (×2)",city*2,city?"":"muted")+
       pstatRow("Longest Road",lrVP?`+2 <span class="award pstat-award">⛏ road</span>`:"—",lrVP?"":"muted")+
-      pstatRow("Largest Army",laVP?`+2 <span class="award pstat-award">⚔ army</span>`:"—",laVP?"":"muted");
+      pstatRow("Largest Army",laVP?`+2 <span class="award pstat-award">⚔ army</span>`:"—",laVP?"":"muted")+
+      (final?pstatRow("VP Cards (revealed)",vpCards,vpCards?"vp-card-row":"muted"):"");
     return `<div class="pstat-card">
       <div class="pstat-head">
         <span class="swatch" style="background:${PLAYER_COLORS[i]}"></span>
         <span class="pstat-name">${PLAYER_NAMES[i]}</span>
-        <span class="pstat-vp">${pubVP} <small>VP</small></span>
+        <span class="pstat-vp">${dispVP} <small>VP</small></span>
       </div>
       <div class="pstat-sec"><div class="pstat-sl">Victory Points</div><div class="pstat-rows">${vpRows}</div></div>
       <div class="pstat-sec"><div class="pstat-sl">Pieces Built</div><div class="pstat-rows">
@@ -1535,7 +1588,7 @@ function playerStatsHTML(){
   }).join("");
   return `<div class="stats-block">
       <div class="stats-h">Players</div>
-      <div class="stats-sub">Live per-player breakdown. Hidden Victory Point cards are not shown here.</div>
+      <div class="stats-sub">${final?"Final per-player breakdown — Victory Point cards now revealed.":"Live per-player breakdown. Hidden Victory Point cards are not shown here."}</div>
       <div class="pstat-grid">${cards}</div>
     </div>`;
 }
@@ -2457,6 +2510,100 @@ function playBotMonopoly(res){
   S.players[p].dev.mono--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
   pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[res].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
   recomputeVP(); recordSnapshot(); renderAll();
+}
+
+/* ================= GAME-OVER SCOREBOARD ================= */
+function showGameOverScoreboard(){
+  const m=$("gameOverModal");
+  m.innerHTML=gameOverHTML();
+  $("gameOverOverlay").classList.remove("hidden");
+}
+function closeGameOver(){
+  $("gameOverOverlay").classList.add("hidden");
+  clearTimeout(botTimer);
+  renderSetup();
+  $("overlay").classList.remove("hidden");
+}
+function gameOverHTML(){
+  const sorted=[...S.players].sort((a,b)=>b.vp-a.vp);
+  const ordinals=["1st","2nd","3rd","4th","5th","6th"];
+  let rankRows="";
+  sorted.forEach((pl,rank)=>{
+    const i=pl.i;
+    const settle=ownCount(i,"settlement"), city=ownCount(i,"city");
+    const lrVP=(S.longestRoad===i)?2:0, laVP=(S.largestArmy===i)?2:0;
+    const vpCards=pl.dev.vp;
+    const totalVP=settle+city*2+lrVP+laVP+vpCards;
+    const isWinner=(i===S.winner);
+    let chips="";
+    if(settle) chips+=`<span class="sb-vp-chip">${settle} settle${settle!==1?"s":""}</span>`;
+    if(city) chips+=`<span class="sb-vp-chip">${city} cit${city!==1?"ies":"y"} +${city*2}</span>`;
+    if(lrVP) chips+=`<span class="sb-vp-chip special">⛏ Road +2</span>`;
+    if(laVP) chips+=`<span class="sb-vp-chip special">⚔ Army +2</span>`;
+    if(vpCards) chips+=`<span class="sb-vp-chip vp-card">★ ${vpCards} VP card${vpCards!==1?"s":""}</span>`;
+    if(!chips) chips=`<span class="sb-vp-chip">0 VP sources</span>`;
+    rankRows+=`<div class="sb-rank-row${isWinner?" sb-winner":""}">
+      <div class="sb-rank-num">${isWinner?"🏆":ordinals[rank]}</div>
+      <div class="sb-rank-info">
+        <div class="sb-rank-name-row">
+          <span class="swatch" style="background:${PLAYER_COLORS[i]}"></span>
+          <span class="sb-rank-name">${PLAYER_NAMES[i]}</span>
+        </div>
+        <div class="sb-vp-breakdown">${chips}</div>
+      </div>
+      <div class="sb-vp-total">${totalVP}<small style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:500"> VP</small></div>
+    </div>`;
+  });
+  const awardsInner=gameOverAwardsHTML();
+  const awardsSection=awardsInner?`<div class="sb-h">Awards</div><div class="sb-awards-grid">${awardsInner}</div>`:"";
+  const statsSection=`<div class="sb-h">Full-Game Statistics</div><div class="sb-stats-wrap">${diceStatsHTML()}${prodStatsHTML()}${playerStatsHTML(true)}</div>`;
+  const playBtn=`<button class="btn primary" style="min-width:200px;padding:13px 24px;font-size:15px" onclick="closeGameOver()">Play again / New game</button>`;
+  const isStalemate=(S.players[S.winner].vp<10);
+  const subLine=isStalemate
+    ?`Stalemate — ${PLAYER_NAMES[S.winner]} wins on points (${S.players[S.winner].vp} VP).`
+    :`🏆 ${PLAYER_NAMES[S.winner]} wins the island!`;
+  return `<div class="sb-title">GAME OVER</div>
+    <div class="sb-sub">${subLine}</div>
+    <div class="sb-h">Final Standings</div>
+    <div class="sb-rank-list">${rankRows}</div>
+    ${awardsSection}
+    ${statsSection}
+    <div class="sb-footer">${playBtn}</div>`;
+}
+function gameOverAwardsHTML(){
+  if(!S) return "";
+  const n=S.nPlayers;
+  function best(fn,minVal){
+    let max=-Infinity,winners=[];
+    for(let i=0;i<n;i++){const v=fn(i); if(v>max){max=v;winners=[i];} else if(v===max&&isFinite(v)) winners.push(i);}
+    if(minVal!==undefined&&max<minVal) return null;
+    if(!isFinite(max)) return null;
+    return {val:max,players:winners};
+  }
+  function names(idxs){ return idxs.map(i=>`<span style="color:${PLAYER_COLORS[i]}">${PLAYER_NAMES[i]}</span>`).join(" &amp; "); }
+  const awards=[];
+  const totalRolls=S.rollCounts.reduce((a,b)=>a+b,0);
+  if(totalRolls>2){
+    const b=best(i=>RES_ORDER.reduce((s,r)=>s+S.playerProduction[i][r],0)-S.players[i].expProd);
+    if(b){ const s=b.val>=0?"+":""; awards.push({icon:"🍀",label:"Luckiest",who:names(b.players),detail:`${s}${b.val.toFixed(1)} vs expected`}); }
+  }
+  const mb=best(i=>ownCount(i,"city"),1);
+  if(mb) awards.push({icon:"🏙️",label:"Master Builder",who:names(mb.players),detail:`${mb.val} cit${mb.val!==1?"ies":"y"} built`});
+  const wl=best(i=>S.players[i].playedKnights,1);
+  if(wl) awards.push({icon:"⚔️",label:"Warlord",who:names(wl.players),detail:`${wl.val} knight${wl.val!==1?"s":""} played`});
+  const rk=best(i=>S.players[i].roadLen,5);
+  if(rk) awards.push({icon:"🛣️",label:"Road King",who:names(rk.players),detail:`${rk.val}-road trail`});
+  const tr=best(i=>S.players[i].tradesBank+S.players[i].tradesHarbour+S.players[i].tradesPlayer,1);
+  if(tr) awards.push({icon:"💱",label:"Top Trader",who:names(tr.players),detail:`${tr.val} trade${tr.val!==1?"s":""}`});
+  const mr=best(i=>S.players[i].cardsStolenFrom,1);
+  if(mr) awards.push({icon:"😢",label:"Most Robbed",who:names(mr.players),detail:`robbed ${mr.val} time${mr.val!==1?"s":""}`});
+  if(!awards.length) return "";
+  return awards.map(a=>`<div class="sb-award-card">
+    <div class="sb-award-icon">${a.icon}</div>
+    <div class="sb-award-label">${a.label}</div>
+    <div class="sb-award-who">${a.who}</div>
+    <div class="sb-award-detail">${a.detail}</div>
+  </div>`).join("");
 }
 
 /* ---------------- Init ---------------- */
