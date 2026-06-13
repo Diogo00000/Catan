@@ -391,6 +391,24 @@
   .sb-award-detail{font-size:10.5px;color:var(--ink-soft);}
   .sb-stats-wrap .stats-block{margin-bottom:12px;}
   .sb-footer{text-align:center;padding-top:16px;border-top:1px solid rgba(107,79,46,.16);margin-top:8px;}
+
+  /* ---------- Rules / How-to-play panel ---------- */
+  .head-btns{display:flex; gap:8px; flex:0 0 auto;}
+  .rules-modal{max-width:780px; width:min(94vw,780px); max-height:88vh; overflow-y:auto;
+    text-align:left; padding:26px 30px 22px; position:relative;}
+  .rules-modal .sb-sub{margin-bottom:20px;}
+  .rules-close{position:absolute; top:18px; right:20px;}
+  .rules-sec{margin:0;}
+  .rules-sec p{font-size:13px; line-height:1.6; color:var(--ink); margin:0 0 11px; max-width:none;}
+  .rules-sec ul{margin:0 0 13px; padding-left:20px;}
+  .rules-sec li{font-size:13px; line-height:1.55; color:var(--ink); margin-bottom:6px;}
+  .rules-sec li b, .rules-sec p b{color:var(--wood-dark);}
+  .rules-cost{width:100%; border-collapse:collapse; font-size:12.5px; margin:0 0 13px;}
+  .rules-cost th, .rules-cost td{text-align:left; padding:6px 9px; border-bottom:1px solid rgba(107,79,46,.14);}
+  .rules-cost th{font-size:9.5px; letter-spacing:.7px; text-transform:uppercase; color:var(--ink-soft); font-weight:700;}
+  .rules-cost td:first-child{font-weight:700; color:var(--wood-dark); white-space:nowrap;}
+  .rules-cost tr:last-child td{border-bottom:0;}
+  .rules-note{font-size:12px; color:var(--ink-soft); font-style:italic; margin:-4px 0 13px;}
 </style>
 </head>
 <body>
@@ -410,7 +428,10 @@
   <aside class="panel">
     <div class="panel-head">
       <h1 class="title">CATAN<span class="small">Pass &amp; Play Island</span></h1>
-      <button class="btn-ghost" id="newGameBtn">New game</button>
+      <div class="head-btns">
+        <button class="btn-ghost" id="rulesBtn">Rules</button>
+        <button class="btn-ghost" id="newGameBtn">New game</button>
+      </div>
     </div>
 
     <div class="section">
@@ -520,6 +541,112 @@
 <!-- Game-over scoreboard -->
 <div class="overlay hidden" id="gameOverOverlay">
   <div class="modal sb-modal" id="gameOverModal"></div>
+</div>
+
+<!-- Rules / How-to-play panel -->
+<div class="overlay hidden" id="rulesOverlay">
+  <div class="modal rules-modal" id="rulesModal">
+    <button class="btn-ghost rules-close" id="rulesCloseTop">Close ✕</button>
+    <h2 class="sb-title">How to Play</h2>
+    <div class="sb-sub">Settlers of the Island — quick reference</div>
+
+    <div class="rules-sec">
+      <h3 class="sb-h">Goal</h3>
+      <p>Be the first player to reach <b>10 victory points</b>. Points come from your settlements and cities on the board, plus the special awards and Victory Point cards described below. The game ends the instant someone reaches 10 on their turn.</p>
+
+      <h3 class="sb-h">Setup</h3>
+      <p>Play happens in <b>snake order</b>. Going around the table once, each player places a settlement and a road. Then, in reverse order, each player places a <b>second</b> settlement and road. So everyone ends up with 2 settlements and 2 roads before normal turns begin.</p>
+      <ul>
+        <li>Your <b>second</b> settlement immediately earns you one resource from each hex touching it — your starting hand.</li>
+        <li>The usual placement rules apply during setup, except your first roads/settlements don't yet need to connect to anything.</li>
+      </ul>
+
+      <h3 class="sb-h">The Board</h3>
+      <p>The island is a ring of hexes. Each producing hex shows a resource and a number token. When that number is rolled, the hex produces its resource for every settlement and city touching it.</p>
+      <ul>
+        <li><b>Resources:</b> wood, brick, sheep, wheat and ore.</li>
+        <li>The <b>desert</b> produces nothing and is where the <b>robber</b> starts.</li>
+        <li>With <b>5–6 players</b> the larger extension board is used, with more hexes and number tokens.</li>
+      </ul>
+
+      <h3 class="sb-h">A Turn</h3>
+      <ul>
+        <li><b>(Optional) Play one development card</b> — you may do this before rolling.</li>
+        <li><b>Roll the dice.</b> Every settlement on a matching hex collects <b>1</b> resource; every city collects <b>2</b>.</li>
+        <li><b>Build, trade, and/or play a development card</b> (if you haven't already played one this turn).</li>
+        <li><b>End your turn</b> and pass to the next player.</li>
+      </ul>
+      <p class="rules-note">Only one development card may be played per turn — before <em>or</em> after the roll — and never on the same turn you bought it.</p>
+
+      <h3 class="sb-h">Rolling a 7</h3>
+      <ul>
+        <li>No resources are produced.</li>
+        <li>Every player holding <b>more than 7 cards</b> discards <b>half</b> (rounded down) back to the bank.</li>
+        <li>The roller moves the <b>robber</b> to a new hex and <b>steals one random card</b> from an opponent with a settlement or city touching that hex.</li>
+        <li>The robber <b>blocks its hex</b> from producing anything until it is moved again (by another 7 or a Knight).</li>
+      </ul>
+
+      <h3 class="sb-h">Building</h3>
+      <table class="rules-cost">
+        <tr><th>Build</th><th>Cost</th></tr>
+        <tr><td>Road</td><td>1 wood + 1 brick</td></tr>
+        <tr><td>Settlement</td><td>1 wood + 1 brick + 1 sheep + 1 wheat</td></tr>
+        <tr><td>City</td><td>3 ore + 2 wheat</td></tr>
+        <tr><td>Development card</td><td>1 ore + 1 wheat + 1 sheep</td></tr>
+      </table>
+      <ul>
+        <li>A <b>settlement</b> must connect to one of your own roads, and can't sit next to another settlement or city — there must be at least one empty intersection between them (the <b>distance rule</b>).</li>
+        <li>A <b>city</b> upgrades one of your existing settlements (and then collects 2 of each matching resource instead of 1).</li>
+      </ul>
+
+      <h3 class="sb-h">Victory Points</h3>
+      <ul>
+        <li><b>Settlement</b> — 1 point each.</li>
+        <li><b>City</b> — 2 points each.</li>
+        <li><b>Longest Road</b> — 2 points.</li>
+        <li><b>Largest Army</b> — 2 points.</li>
+        <li><b>Victory Point card</b> — 1 point each (kept hidden until you win).</li>
+      </ul>
+
+      <h3 class="sb-h">Trading</h3>
+      <p>You may trade on your turn, <b>after rolling</b>:</p>
+      <ul>
+        <li><b>Bank</b> — trade 4 identical resources for any 1 resource (4:1).</li>
+        <li><b>Harbours</b> — 3:1 on a generic harbour, or 2:1 for a specific resource, if you have a settlement or city on that harbour.</li>
+        <li><b>Players</b> — make direct trades with other players for any resources you both agree on.</li>
+      </ul>
+
+      <h3 class="sb-h">Development Cards</h3>
+      <ul>
+        <li><b>Knight</b> — move the robber and steal a card, just like rolling a 7. Playing <b>3 Knights</b> earns Largest Army.</li>
+        <li><b>Victory Point</b> — +1 victory point, kept hidden.</li>
+        <li><b>Road Building</b> — place 2 roads for free.</li>
+        <li><b>Year of Plenty</b> — take any 2 resources from the bank.</li>
+        <li><b>Monopoly</b> — name one resource; every other player hands you all of theirs.</li>
+      </ul>
+
+      <h3 class="sb-h">Longest Road</h3>
+      <p>The first player to build a continuous road of <b>5 or more</b> segments takes the <b>+2 VP</b> Longest Road award. It passes to any player who later builds a <b>strictly longer</b> road.</p>
+
+      <h3 class="sb-h">Largest Army</h3>
+      <p>The first player to play <b>3 Knights</b> takes the <b>+2 VP</b> Largest Army award. It passes to any player who later plays <b>more</b> Knights.</p>
+
+      <h3 class="sb-h">The Bank</h3>
+      <p>The bank holds <b>19 of each</b> resource. If a roll would pay out more of a resource than remains, then: a <b>single</b> owed player takes whatever is left; but if <b>several</b> players are owed that resource and there isn't enough for all of them, <b>none</b> of them receive it.</p>
+
+      <h3 class="sb-h">This App's Controls</h3>
+      <ul>
+        <li><b>Manual vs Auto mode</b> — In Manual mode you make every decision for the active seat. In Auto · watch mode each seat plays itself while you watch the game unfold.</li>
+        <li><b>Pause &amp; Speed</b> — While auto-playing, use Pause to stop the action and the Speed buttons (Slow / Normal / Fast) to set how quickly the bots take their plays.</li>
+        <li><b>Stats view</b> — Switch the board area to the live Stats tab to see roll-frequency and resource-production figures update as the game goes.</li>
+        <li><b>Rewind / Replay</b> — Available when the game is paused or in Manual mode. Drag the timeline or use the step buttons to scrub back through every play, then "Return to present" to rejoin the live game.</li>
+      </ul>
+    </div>
+
+    <div class="sb-footer">
+      <button class="btn primary" id="rulesCloseBtn" style="min-width:160px;padding:11px 22px;font-size:14px">Close</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -2608,6 +2735,13 @@ function gameOverAwardsHTML(){
 
 /* ---------------- Init ---------------- */
 $("newGameBtn").addEventListener("click",()=>{clearTimeout(botTimer);renderSetup();$("overlay").classList.remove("hidden");});
+function openRules(){ $("rulesModal").scrollTop=0; $("rulesOverlay").classList.remove("hidden"); }
+function closeRules(){ $("rulesOverlay").classList.add("hidden"); }
+$("rulesBtn").addEventListener("click",openRules);
+$("rulesCloseTop").addEventListener("click",closeRules);
+$("rulesCloseBtn").addEventListener("click",closeRules);
+$("rulesOverlay").addEventListener("click",e=>{ if(e.target===$("rulesOverlay")) closeRules(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("rulesOverlay").classList.contains("hidden")) closeRules(); });
 $("modeManual").addEventListener("click",()=>setWatch(false));
 $("modeAuto").addEventListener("click",()=>setWatch(true));
 $("pauseBtn").addEventListener("click",togglePause);
