@@ -163,12 +163,14 @@
   .panel-head{
     position:sticky; top:0; z-index:5;
     padding:16px 18px 12px; border-bottom:1px solid rgba(107,79,46,.22);
-    display:flex; align-items:baseline; justify-content:space-between;
-    flex-wrap:wrap; gap:8px;   /* let the header buttons wrap instead of clipping */
+    display:flex; align-items:center; justify-content:center;
     background:linear-gradient(180deg, rgba(107,79,46,.10), transparent), var(--parchment);
   }
-  .title{font-family:'Cinzel',Georgia,serif; font-weight:700; font-size:26px; letter-spacing:5px; margin:0; color:var(--wood-dark);}
-  .title .small{display:block; font-family:'Outfit',sans-serif; font-weight:500; font-size:9.5px; letter-spacing:3px; color:var(--ink-soft); text-transform:uppercase; margin-top:2px;}
+  .title{font-family:'Cinzel',Georgia,serif; font-weight:700; font-size:26px; letter-spacing:5px; margin:0; color:var(--wood-dark); text-align:center;}
+  /* ---- Controls bar (sound left, Rules / New game right) ---- */
+  .controls-bar{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+  .sound-ctl{display:flex; align-items:center; gap:8px;}
+  .ctl-right{display:flex; align-items:center; gap:8px; margin-left:auto;}
   .btn-ghost{
     font-family:'Outfit',sans-serif; font-size:11px; letter-spacing:.5px; cursor:pointer;
     background:transparent; color:var(--ink-soft); border:1px solid rgba(107,79,46,.35);
@@ -239,7 +241,13 @@
 
   /* Auto-play bar */
   #autoSection{display:none;}
-  .autobar{display:flex; flex-wrap:wrap; align-items:center; gap:8px;}
+  .autobar{display:flex; flex-direction:column; gap:10px;}
+  .mode-line{display:flex; align-items:center; justify-content:space-between; gap:8px 12px; flex-wrap:wrap;}
+  .mode-left{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .speed-line{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  /* Manual mode greys out & disables Pause and the whole Speed line (same look as a disabled Start button) */
+  .autobar.manual #pauseBtn,
+  .autobar.manual .speed-line{opacity:.4; pointer-events:none;}
   .seg-group{display:inline-flex; border:1px solid rgba(107,79,46,.35); border-radius:8px; overflow:hidden;}
   .seg{font-family:'Outfit',sans-serif; font-size:11px; cursor:pointer; background:rgba(255,255,255,.30);
     border:0; padding:6px 11px; color:var(--ink); border-right:1px solid rgba(107,79,46,.22);}
@@ -248,7 +256,7 @@
   .seg.sel{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); font-weight:700;}
   #pauseBtn{border:1px solid rgba(107,79,46,.35); border-radius:8px;}
   .spd-lab{font-size:9px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-soft);}
-  .auto-status{flex:1 1 100%; font-size:10.5px; color:var(--ink-soft); font-style:italic;}
+  .auto-status{font-size:10.5px; color:var(--ink-soft); font-style:italic; text-align:right; margin-left:auto;}
   .watch-row{display:flex; align-items:center; gap:8px; margin:2px 0 14px; font-size:12.5px; color:var(--ink); cursor:pointer;}
   .watch-row input{width:16px; height:16px; cursor:pointer;}
 
@@ -430,7 +438,6 @@
   .sb-footer{text-align:center;padding-top:16px;border-top:1px solid rgba(107,79,46,.16);margin-top:8px;}
 
   /* ---------- Sound controls ---------- */
-  .head-btns{display:flex; gap:8px; flex:0 1 auto; align-items:center; flex-wrap:wrap; justify-content:flex-end;}
   #soundBtn{font-size:15px; line-height:1; padding:7px 9px;}
   #soundBtn.muted{color:#9c3b30; border-color:rgba(156,59,48,.55); background:rgba(156,59,48,.10); opacity:.95;}
   .vol-slider{width:64px; height:4px; accent-color:var(--wood); cursor:pointer; flex:0 0 auto;}
@@ -470,12 +477,41 @@
 
   <aside class="panel">
     <div class="panel-head">
-      <h1 class="title">CATAN<span class="small">Pass &amp; Play Island</span></h1>
-      <div class="head-btns">
+      <h1 class="title">CATAN</h1>
+    </div>
+
+    <div class="section controls-bar">
+      <div class="sound-ctl">
         <button class="btn-ghost" id="soundBtn" title="Sound on/off" aria-label="Toggle sound">🔊</button>
         <input type="range" id="volSlider" class="vol-slider" min="0" max="100" value="60" title="Volume" aria-label="Volume">
+      </div>
+      <div class="ctl-right">
         <button class="btn-ghost" id="rulesBtn">Rules</button>
         <button class="btn-ghost" id="newGameBtn">New game</button>
+      </div>
+    </div>
+
+    <div class="section" id="autoSection">
+      <div class="autobar">
+        <div class="mode-line">
+          <div class="mode-left">
+            <span class="spd-lab">Mode</span>
+            <div class="seg-group">
+              <button class="seg" id="modeManual">Manual</button>
+              <button class="seg" id="modeAuto">Auto · watch</button>
+            </div>
+            <button class="seg" id="pauseBtn">Pause</button>
+          </div>
+          <div class="auto-status" id="autoStatus"></div>
+        </div>
+        <div class="speed-line" id="speedLine">
+          <span class="spd-lab">Speed</span>
+          <div class="seg-group" id="spdGroup">
+            <button class="seg spd" data-ms="1100">Slow</button>
+            <button class="seg spd" data-ms="550">Normal</button>
+            <button class="seg spd" data-ms="220">Fast</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -485,24 +521,6 @@
         <div class="sum" id="sum">–<small>Roll</small></div>
       </div>
       <div class="bank" id="bank"></div>
-    </div>
-
-    <div class="section" id="autoSection">
-      <div class="autobar">
-        <span class="spd-lab">Mode</span>
-        <div class="seg-group">
-          <button class="seg" id="modeManual">Manual</button>
-          <button class="seg" id="modeAuto">Auto · watch</button>
-        </div>
-        <button class="seg" id="pauseBtn">Pause</button>
-        <span class="spd-lab">Speed</span>
-        <div class="seg-group" id="spdGroup">
-          <button class="seg spd" data-ms="1100">Slow</button>
-          <button class="seg spd" data-ms="550">Normal</button>
-          <button class="seg spd" data-ms="220">Fast</button>
-        </div>
-        <div class="auto-status" id="autoStatus"></div>
-      </div>
     </div>
 
     <div class="section">
@@ -2500,11 +2518,12 @@ function renderAutoBar(){
   $("pauseBtn").textContent=paused?"Resume":"Pause";
   $("pauseBtn").classList.toggle("sel",paused);
   document.querySelectorAll(".spd").forEach(b=>b.classList.toggle("sel",+b.dataset.ms===speedMs));
-  let st="";
-  if(paused) st="⏸ Paused.";
-  else if(watchMode) st=watchPendingOff?"Watching — will hand back to Manual next turn.":"Watching — bots control every seat.";
-  else st=anyBots()?"Manual — humans play by hand; bot seats auto-play.":"Manual — all seats are human.";
-  $("autoStatus").textContent=st;
+  const manual=!watchMode;                              // Pause + Speed are inert while playing by hand
+  const bar=document.querySelector(".autobar");
+  if(bar) bar.classList.toggle("manual",manual);       // grey out Pause + Speed in Manual mode
+  $("pauseBtn").disabled=manual;
+  document.querySelectorAll(".spd").forEach(b=>b.disabled=manual);
+  $("autoStatus").textContent = watchMode ? "Watching: bots control every seat" : "Manual: all seats are human";
 }
 
 /* ---- scheduler: one visible bot action per tick; always terminates ---- */
