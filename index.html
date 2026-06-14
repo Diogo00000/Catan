@@ -29,18 +29,23 @@
     -webkit-font-smoothing:antialiased;
   }
   .wrap{
-    max-width:1180px; margin:0 auto; padding:18px 18px 40px;
-    display:flex; gap:20px; align-items:flex-start;
+    width:100%; margin:0; padding:18px; gap:20px;
+    display:flex; align-items:stretch;
+    height:100vh; height:100dvh; overflow:hidden;
   }
   /* ---------- Board ---------- */
   .board-card{
     flex:1 1 auto; min-width:0;
+    display:flex; flex-direction:column;
     background:linear-gradient(160deg,#0f3a44,#0c3038);
     border:1px solid rgba(224,184,74,.25);
     border-radius:14px; padding:10px;
     box-shadow:var(--shadow);
   }
-  svg#board{display:block; width:100%; height:auto;}
+  /* SVG fills the board area, scaling to fit within both width and height
+     (preserveAspectRatio="xMidYMid meet" on the element keeps it centred,
+     never cut off and never taller than its box). */
+  svg#board{display:block; width:100%; height:auto; flex:1 1 0; min-height:0;}
   .hex-poly{stroke:rgba(20,30,20,.45); stroke-width:1.4; cursor:default;}
   .tok-circle{fill:var(--parchment); stroke:#9c8554; stroke-width:1.4;}
   .tok-text{font-family:'Cinzel',Georgia,serif; font-weight:700; text-anchor:middle; dominant-baseline:central; fill:var(--ink);}
@@ -87,7 +92,7 @@
   .view-tabs .seg.sel{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); font-weight:700;}
 
   /* ---------- Stats view ---------- */
-  .stats-view{padding:4px 2px 8px;}
+  .stats-view{padding:4px 2px 8px; flex:1 1 0; min-height:0; overflow-y:auto;}
   .stats-block{background:linear-gradient(175deg,var(--parchment),var(--parchment-2));
     border:1px solid var(--parchment-edge); border-radius:12px; padding:16px 18px; margin-bottom:14px; box-shadow:var(--shadow);}
   .stats-block:last-child{margin-bottom:0;}
@@ -149,16 +154,18 @@
 
   /* ---------- Panel ---------- */
   .panel{
-    flex:0 0 348px; width:348px;
+    flex:0 0 410px; width:410px;
     background:linear-gradient(175deg,var(--parchment),var(--parchment-2));
     border:1px solid var(--parchment-edge);
     border-radius:14px; box-shadow:var(--shadow);
-    overflow:hidden;
+    overflow:hidden auto;   /* scroll internally instead of stretching the page */
   }
   .panel-head{
+    position:sticky; top:0; z-index:5;
     padding:16px 18px 12px; border-bottom:1px solid rgba(107,79,46,.22);
     display:flex; align-items:baseline; justify-content:space-between;
-    background:linear-gradient(180deg, rgba(107,79,46,.10), transparent);
+    flex-wrap:wrap; gap:8px;   /* let the header buttons wrap instead of clipping */
+    background:linear-gradient(180deg, rgba(107,79,46,.10), transparent), var(--parchment);
   }
   .title{font-family:'Cinzel',Georgia,serif; font-weight:700; font-size:26px; letter-spacing:5px; margin:0; color:var(--wood-dark);}
   .title .small{display:block; font-family:'Outfit',sans-serif; font-weight:500; font-size:9.5px; letter-spacing:3px; color:var(--ink-soft); text-transform:uppercase; margin-top:2px;}
@@ -366,9 +373,16 @@
   .offer-side{font-weight:700;}
   .offer-arrow{text-align:center; color:var(--gold-deep); font-size:16px;}
 
-  @media (max-width:880px){
-    .wrap{flex-direction:column;}
-    .panel{flex:1 1 auto; width:100%;}
+  /* ---------- Narrow screens (tablet portrait / phone) ---------- */
+  @media (max-width:900px){
+    /* Stack: board on top, panel below, whole page scrolls. */
+    .wrap{flex-direction:column; height:auto; min-height:100dvh; overflow:visible;}
+    .board-card{flex:0 0 auto;}
+    /* Board scales to the available width and sizes its own height. */
+    svg#board{flex:0 0 auto; height:auto;}
+    .stats-view{flex:0 0 auto; min-height:0; overflow-y:visible;}
+    .panel{flex:1 1 auto; width:100%; overflow:visible;}
+    .panel-head{position:static;}
   }
 
   /* ---------- Game-Over Scoreboard ---------- */
@@ -416,7 +430,7 @@
   .sb-footer{text-align:center;padding-top:16px;border-top:1px solid rgba(107,79,46,.16);margin-top:8px;}
 
   /* ---------- Sound controls ---------- */
-  .head-btns{display:flex; gap:8px; flex:0 0 auto; align-items:center;}
+  .head-btns{display:flex; gap:8px; flex:0 1 auto; align-items:center; flex-wrap:wrap; justify-content:flex-end;}
   #soundBtn{font-size:15px; line-height:1; padding:7px 9px;}
   #soundBtn.muted{color:#9c3b30; border-color:rgba(156,59,48,.55); background:rgba(156,59,48,.10); opacity:.95;}
   .vol-slider{width:64px; height:4px; accent-color:var(--wood); cursor:pointer; flex:0 0 auto;}
@@ -450,7 +464,7 @@
         <button class="seg" id="tabStats" onclick="showView('stats')">Stats</button>
       </div>
     </div>
-    <svg id="board" viewBox="-50 -50 700 690" role="img" aria-label="Catan board"></svg>
+    <svg id="board" viewBox="-50 -50 700 690" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Catan board"></svg>
     <div id="statsView" class="stats-view" style="display:none"></div>
   </div>
 
