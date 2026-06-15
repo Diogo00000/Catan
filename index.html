@@ -245,8 +245,7 @@
   .mode-line{display:flex; align-items:center; justify-content:space-between; gap:8px 12px; flex-wrap:wrap;}
   .mode-left{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
   .speed-line{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
-  /* Manual mode greys out & disables Pause and the whole Speed line (same look as a disabled Start button) */
-  .autobar.manual #pauseBtn,
+  /* Manual mode greys out & disables the whole Speed line, including the Pause button (same look as a disabled Start button) */
   .autobar.manual .speed-line{opacity:.4; pointer-events:none;}
   .seg-group{display:inline-flex; border:1px solid rgba(107,79,46,.35); border-radius:8px; overflow:hidden;}
   .seg{font-family:'Outfit',sans-serif; font-size:11px; cursor:pointer; background:rgba(255,255,255,.30);
@@ -254,7 +253,7 @@
   .seg:last-child{border-right:0;}
   .seg:hover:not(.sel){background:rgba(107,79,46,.10);}
   .seg.sel{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); font-weight:700;}
-  #pauseBtn{border:1px solid rgba(107,79,46,.35); border-radius:8px;}
+  #pauseBtn{border:1px solid rgba(107,79,46,.35); border-radius:8px; margin-left:auto;}
   .spd-lab{font-size:9px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-soft);}
   .auto-status{font-size:10.5px; color:var(--ink-soft); font-style:italic; text-align:right; margin-left:auto;}
   .watch-row{display:flex; align-items:center; gap:8px; margin:2px 0 14px; font-size:12.5px; color:var(--ink); cursor:pointer;}
@@ -500,7 +499,6 @@
               <button class="seg" id="modeManual">Manual</button>
               <button class="seg" id="modeAuto">Auto · watch</button>
             </div>
-            <button class="seg" id="pauseBtn">Pause</button>
           </div>
           <div class="auto-status" id="autoStatus"></div>
         </div>
@@ -511,6 +509,7 @@
             <button class="seg spd" data-ms="550">Normal</button>
             <button class="seg spd" data-ms="220">Fast</button>
           </div>
+          <button class="seg" id="pauseBtn">Pause</button>
         </div>
       </div>
     </div>
