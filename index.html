@@ -11,7 +11,8 @@
   :root{
     --sea:#11414c; --sea-deep:#0b2c34; --sea-glow:#1c5e6c;
     --parchment:#f3e7cd; --parchment-2:#ece0c2; --parchment-edge:#d8c49a;
-    --pc-band:#e8d7b1; /* slightly darker beige for player-card section bands */
+    --pc-band:#e8d7b1; /* slightly darker beige for player-card body */
+    --pc-head:#ddc99c; /* one step darker beige for the player-card header band */
     --wood:#6b4f2e; --wood-dark:#3a2a1a; --ink:#2c2117; --ink-soft:#5d4e3c;
     --gold:#e0b84a; --gold-deep:#b8902c;
     --t-wood:#2f6b3c; --t-brick:#bf6138; --t-sheep:#a8c459; --t-wheat:#e3b23c; --t-ore:#74808d; --t-desert:#d9c08c;
@@ -209,15 +210,15 @@
   .players{display:flex; flex-direction:column; gap:11px;}
   .swatch{width:18px; height:18px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
 
-  /* Redesigned player card: light-beige body with darker-beige section bands */
-  .pcard{border-radius:14px; background:var(--parchment); padding:7px;
+  /* Redesigned player card: darker-beige body with a still-darker header band */
+  .pcard{border-radius:14px; background:var(--pc-band); padding:7px;
     display:flex; flex-direction:column; gap:7px;
     border:1px solid rgba(107,79,46,.22); box-shadow:0 1px 3px rgba(0,0,0,.10);}
   .pcard.active{box-shadow:0 0 0 3px var(--gold), 0 0 12px rgba(224,184,74,.45), 0 1px 4px rgba(0,0,0,.12);}
 
-  /* 1) Header band — darker-beige panel: colour swatch + name (left), badges, VP (right) */
+  /* 1) Header band — still-darker beige panel: colour swatch + name (left), badges, VP (right) */
   .pc-head{display:flex; align-items:center; gap:7px; padding:7px 10px;
-    background:var(--pc-band); border-radius:10px; color:var(--ink);}
+    background:var(--pc-head); border-radius:10px; color:var(--ink);}
   .pc-swatch{width:17px; height:17px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
   .pc-name{font-family:'Cinzel',serif; font-weight:700; font-size:15px; letter-spacing:1.5px;
     text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; color:var(--ink);}
@@ -247,8 +248,10 @@
   .pc-stat svg{width:15px; height:15px; flex:0 0 auto; opacity:.85;}
   .pc-stat b{font-family:'Cinzel',serif; color:var(--wood-dark); font-weight:700; font-size:12.5px;}
 
-  /* 4) Ports — darker-beige panel */
-  .pc-ports{display:flex; align-items:flex-start; gap:8px; padding:7px 10px; background:var(--pc-band); border-radius:10px; flex-wrap:wrap;}
+  /* 4) Ports — same beige body, with a thin clipped divider above it */
+  .pc-ports{position:relative; display:flex; align-items:flex-start; gap:8px; padding:7px 10px; background:var(--pc-band); border-radius:10px; flex-wrap:wrap;}
+  .pc-ports::before{content:""; position:absolute; top:-4px; left:14px; right:14px; height:1px;
+    background:rgba(247,237,210,.85); border-radius:1px;}
   .pc-ports-lab{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
     font-weight:700; padding-top:4px; flex:0 0 auto;}
   .pc-tokens{display:flex; flex-wrap:wrap; gap:5px; flex:1 1 auto;}
