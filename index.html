@@ -11,6 +11,7 @@
   :root{
     --sea:#11414c; --sea-deep:#0b2c34; --sea-glow:#1c5e6c;
     --parchment:#f3e7cd; --parchment-2:#ece0c2; --parchment-edge:#d8c49a;
+    --pc-band:#e8d7b1; /* slightly darker beige for player-card section bands */
     --wood:#6b4f2e; --wood-dark:#3a2a1a; --ink:#2c2117; --ink-soft:#5d4e3c;
     --gold:#e0b84a; --gold-deep:#b8902c;
     --t-wood:#2f6b3c; --t-brick:#bf6138; --t-sheep:#a8c459; --t-wheat:#e3b23c; --t-ore:#74808d; --t-desert:#d9c08c;
@@ -204,47 +205,46 @@
   .players{display:flex; flex-direction:column; gap:11px;}
   .swatch{width:18px; height:18px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
 
-  /* Redesigned player card: coloured header, resources bar, stats + ports on parchment */
-  .pcard{border-radius:14px; overflow:hidden; background:var(--parchment);
+  /* Redesigned player card: light-beige body with darker-beige section bands */
+  .pcard{border-radius:14px; background:var(--parchment); padding:7px;
+    display:flex; flex-direction:column; gap:7px;
     border:1px solid rgba(107,79,46,.22); box-shadow:0 1px 3px rgba(0,0,0,.10);}
   .pcard.active{box-shadow:0 0 0 3px var(--gold), 0 0 12px rgba(224,184,74,.45), 0 1px 4px rgba(0,0,0,.12);}
 
-  /* 1) Header band */
-  .pc-head{display:flex; align-items:center; gap:7px; padding:8px 11px;}
-  .pc-head.dark{color:#f6eddb;}
-  .pc-head.light{color:#2c2117;}
+  /* 1) Header band — darker-beige panel: colour swatch + name (left), badges, VP (right) */
+  .pc-head{display:flex; align-items:center; gap:7px; padding:7px 10px;
+    background:var(--pc-band); border-radius:10px; color:var(--ink);}
+  .pc-swatch{width:17px; height:17px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
   .pc-name{font-family:'Cinzel',serif; font-weight:700; font-size:15px; letter-spacing:1.5px;
-    text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto;}
+    text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; color:var(--ink);}
   .pc-badges{display:flex; align-items:center; gap:5px; flex:0 0 auto;}
-  .pc-badge{display:inline-flex; align-items:center; gap:2px; font-size:9.5px; font-weight:700;
-    line-height:1; padding:2px 6px 2px 4px; border:1px solid currentColor; border-radius:11px; white-space:nowrap;}
-  .pc-head.dark .pc-badge{background:rgba(255,255,255,.15);}
-  .pc-head.light .pc-badge{background:rgba(0,0,0,.10);}
+  .pc-badge{display:inline-flex; align-items:center; gap:2px; font-size:9.5px; font-weight:700; color:var(--wood-dark);
+    line-height:1; padding:2px 6px 2px 4px; border:1px solid var(--gold-deep); background:rgba(224,184,74,.32);
+    border-radius:11px; white-space:nowrap;}
   .pc-badge svg{width:13px; height:13px;}
   .pc-vp{margin-left:auto; flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
-    justify-content:center; width:34px; height:34px; border-radius:50%; border:1.5px solid currentColor;}
-  .pc-head.dark .pc-vp{background:rgba(255,255,255,.13);}
-  .pc-head.light .pc-vp{background:rgba(0,0,0,.09);}
+    justify-content:center; width:34px; height:34px; border-radius:50%; border:1.5px solid var(--wood-dark);
+    background:rgba(107,79,46,.12); color:var(--wood-dark);}
   .pc-vp .n{font-family:'Cinzel',serif; font-weight:700; font-size:15px; line-height:1;}
   .pc-vp .l{font-size:7px; font-weight:600; letter-spacing:.5px; line-height:1; margin-top:1px;}
 
-  /* 2) Resources bar */
-  .pc-res{display:grid; grid-template-columns:repeat(5,1fr);}
-  .pc-cell{display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 3px 7px; min-width:0;}
+  /* 2) Resources — five separate rounded colour tiles on the light-beige body */
+  .pc-res{display:grid; grid-template-columns:repeat(5,1fr); gap:6px;}
+  .pc-cell{display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 3px 7px; min-width:0; border-radius:11px;}
   .pc-cell .rl{font-size:8.5px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; opacity:.9;}
   .pc-cell .rn{font-family:'Cinzel',serif; font-weight:700; font-size:16px; line-height:1;}
   .pc-cell.bump{animation:chipBump .35s ease;}
 
-  /* 3) Player stats */
-  .pc-stats{display:flex; padding:8px 6px; border-bottom:1px solid rgba(107,79,46,.16);}
+  /* 3) Player stats — darker-beige panel */
+  .pc-stats{display:flex; padding:7px 6px; background:var(--pc-band); border-radius:10px;}
   .pc-stat{flex:1 1 0; display:inline-flex; align-items:center; justify-content:center; gap:4px;
     font-size:10.5px; color:var(--ink-soft); min-width:0;}
   .pc-stat + .pc-stat{border-left:1px solid rgba(107,79,46,.18);}
   .pc-stat svg{width:15px; height:15px; flex:0 0 auto; opacity:.85;}
   .pc-stat b{font-family:'Cinzel',serif; color:var(--wood-dark); font-weight:700; font-size:12.5px;}
 
-  /* 4) Ports */
-  .pc-ports{display:flex; align-items:flex-start; gap:8px; padding:8px 11px 9px; flex-wrap:wrap;}
+  /* 4) Ports — darker-beige panel */
+  .pc-ports{display:flex; align-items:flex-start; gap:8px; padding:7px 10px; background:var(--pc-band); border-radius:10px; flex-wrap:wrap;}
   .pc-ports-lab{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
     font-weight:700; padding-top:4px; flex:0 0 auto;}
   .pc-tokens{display:flex; flex-wrap:wrap; gap:5px; flex:1 1 auto;}
@@ -773,11 +773,6 @@ const PC_ICONS={
   // Generic 3:1 port — an anchor
   anchor:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M12 7v14"/><path d="M5 13a7 7 0 0 0 14 0"/><path d="M3.5 13H6M18 13h2.5"/></svg>`,
 };
-// Perceived brightness of a #rrggbb colour — true for light colours (white, orange) that need dark text.
-function isLightColor(hex){
-  const c=hex.replace('#',''); const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
-  return (0.299*r+0.587*g+0.114*b)>150;
-}
 // Development cards — playable types (VP cards are never actively played) and all types.
 const DEV_TYPES=["knight","road","plenty","mono"];
 const DEV_ALL=["knight","vp","road","plenty","mono"];
@@ -1743,7 +1738,6 @@ function renderPlayers(){
   S.players.forEach(pl=>{
     const active=(pl.i===S.cur);
     const card=document.createElement("div"); card.className="pcard"+(active?" active":"");
-    const headTone=isLightColor(PLAYER_COLORS[pl.i])?"light":"dark";
     // Header awards — shown only while the player currently holds them.
     let badges="";
     if(S.longestRoad===pl.i) badges+=`<span class="pc-badge" title="Longest Road (+2 VP)">${PC_ICONS.road} +2</span>`;
@@ -1763,7 +1757,8 @@ function renderPlayers(){
     RES_ORDER.forEach(r=>{ if(hTypes.has(r)) tokens+=`<span class="pc-token" title="2:1 ${RES_SHORT[r]} port"><span class="dot" style="background:${TILE_COLORS[r]}"></span> 2:1 ${PORT_SHORT[r]}</span>`; });
     const devHeld=DEV_ALL.reduce((s,t)=>s+pl.dev[t],0);
     card.innerHTML=`
-      <div class="pc-head ${headTone}" style="background:${PLAYER_COLORS[pl.i]}">
+      <div class="pc-head">
+        <span class="pc-swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>
         <span class="pc-name">${PLAYER_NAMES[pl.i]}</span>
         <span class="pc-badges">${badges}</span>
         <span class="pc-vp" title="Victory points"><span class="n">${pl.vp}</span><span class="l">VP</span></span>
