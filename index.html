@@ -201,26 +201,58 @@
   .bank-chip .bc-lab{font-weight:500; font-size:8.5px; letter-spacing:.5px; opacity:.85; text-transform:uppercase;}
 
   /* Players */
-  .players{display:flex; flex-direction:column; gap:9px;}
-  .pcard{display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px;
-    border:1px solid rgba(107,79,46,.18); background:rgba(255,255,255,.30);}
-  .pcard.active{border-color:var(--gold-deep); background:rgba(224,184,74,.18); box-shadow:0 0 0 1px var(--gold-deep) inset;}
+  .players{display:flex; flex-direction:column; gap:11px;}
   .swatch{width:18px; height:18px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
-  .pname{font-weight:600; font-size:13px; flex:0 0 auto; min-width:48px;}
-  .vp{margin-left:auto; font-family:'Cinzel',serif; font-weight:700; font-size:13px; color:var(--wood-dark);
-    background:rgba(107,79,46,.12); border-radius:20px; padding:2px 9px;}
-  .vp small{font-family:'Outfit',sans-serif; font-weight:500; font-size:9px;}
-  .res-chips{display:flex; gap:5px; flex-wrap:wrap; margin-top:7px;}
-  .chip{display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; color:#fff;
-    border-radius:6px; padding:2px 6px; line-height:1.4;}
-  .chip .c-lab{font-weight:500; font-size:8.5px; letter-spacing:.5px; opacity:.85; text-transform:uppercase;}
-  .pcard-body{flex:1 1 100%;}
-  .prow{display:flex; align-items:center; gap:10px;}
-  .pstats{display:flex; flex-wrap:wrap; gap:9px; margin-top:7px; font-size:10.5px; color:var(--ink-soft); align-items:center;}
-  .pstats span{display:inline-flex; align-items:center; gap:3px;}
-  .pstats b{font-family:'Cinzel',serif; color:var(--wood-dark); font-weight:700; font-size:11.5px;}
-  .award{font-size:8px; letter-spacing:.5px; text-transform:uppercase; font-weight:700; color:var(--wood-dark);
-    background:rgba(224,184,74,.4); border:1px solid var(--gold-deep); border-radius:20px; padding:1px 6px; white-space:nowrap;}
+
+  /* Redesigned player card: coloured header, resources bar, stats + ports on parchment */
+  .pcard{border-radius:14px; overflow:hidden; background:var(--parchment);
+    border:1px solid rgba(107,79,46,.22); box-shadow:0 1px 3px rgba(0,0,0,.10);}
+  .pcard.active{box-shadow:0 0 0 3px var(--gold), 0 0 12px rgba(224,184,74,.45), 0 1px 4px rgba(0,0,0,.12);}
+
+  /* 1) Header band */
+  .pc-head{display:flex; align-items:center; gap:7px; padding:8px 11px;}
+  .pc-head.dark{color:#f6eddb;}
+  .pc-head.light{color:#2c2117;}
+  .pc-name{font-family:'Cinzel',serif; font-weight:700; font-size:15px; letter-spacing:1.5px;
+    text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto;}
+  .pc-badges{display:flex; align-items:center; gap:5px; flex:0 0 auto;}
+  .pc-badge{display:inline-flex; align-items:center; gap:2px; font-size:9.5px; font-weight:700;
+    line-height:1; padding:2px 6px 2px 4px; border:1px solid currentColor; border-radius:11px; white-space:nowrap;}
+  .pc-head.dark .pc-badge{background:rgba(255,255,255,.15);}
+  .pc-head.light .pc-badge{background:rgba(0,0,0,.10);}
+  .pc-badge svg{width:13px; height:13px;}
+  .pc-vp{margin-left:auto; flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; width:34px; height:34px; border-radius:50%; border:1.5px solid currentColor;}
+  .pc-head.dark .pc-vp{background:rgba(255,255,255,.13);}
+  .pc-head.light .pc-vp{background:rgba(0,0,0,.09);}
+  .pc-vp .n{font-family:'Cinzel',serif; font-weight:700; font-size:15px; line-height:1;}
+  .pc-vp .l{font-size:7px; font-weight:600; letter-spacing:.5px; line-height:1; margin-top:1px;}
+
+  /* 2) Resources bar */
+  .pc-res{display:grid; grid-template-columns:repeat(5,1fr);}
+  .pc-cell{display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 3px 7px; min-width:0;}
+  .pc-cell .rl{font-size:8.5px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; opacity:.9;}
+  .pc-cell .rn{font-family:'Cinzel',serif; font-weight:700; font-size:16px; line-height:1;}
+  .pc-cell.bump{animation:chipBump .35s ease;}
+
+  /* 3) Player stats */
+  .pc-stats{display:flex; padding:8px 6px; border-bottom:1px solid rgba(107,79,46,.16);}
+  .pc-stat{flex:1 1 0; display:inline-flex; align-items:center; justify-content:center; gap:4px;
+    font-size:10.5px; color:var(--ink-soft); min-width:0;}
+  .pc-stat + .pc-stat{border-left:1px solid rgba(107,79,46,.18);}
+  .pc-stat svg{width:15px; height:15px; flex:0 0 auto; opacity:.85;}
+  .pc-stat b{font-family:'Cinzel',serif; color:var(--wood-dark); font-weight:700; font-size:12.5px;}
+
+  /* 4) Ports */
+  .pc-ports{display:flex; align-items:flex-start; gap:8px; padding:8px 11px 9px; flex-wrap:wrap;}
+  .pc-ports-lab{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
+    font-weight:700; padding-top:4px; flex:0 0 auto;}
+  .pc-tokens{display:flex; flex-wrap:wrap; gap:5px; flex:1 1 auto;}
+  .pc-token{display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600;
+    color:var(--ink-soft); background:rgba(255,255,255,.45); border:1px solid rgba(107,79,46,.28);
+    border-radius:20px; padding:2px 8px; white-space:nowrap;}
+  .pc-token svg{width:12px; height:12px; flex:0 0 auto; opacity:.85;}
+  .pc-token .dot{width:9px; height:9px; border-radius:50%; flex:0 0 auto; border:1px solid rgba(0,0,0,.22);}
 
   /* Actions */
   .prompt{font-size:13px; line-height:1.5; color:var(--ink); background:rgba(107,79,46,.10);
@@ -724,6 +756,28 @@ const TILE_COLORS={wood:"#2f6b3c",brick:"#bf6138",sheep:"#a8c459",wheat:"#e3b23c
 const RES_LABEL={wood:"Wood",brick:"Brick",sheep:"Sheep",wheat:"Wheat",ore:"Ore"};
 const RES_ORDER=["wood","brick","sheep","wheat","ore"];
 const RES_SHORT={wood:"Wood",brick:"Brick",sheep:"Sheep",wheat:"Wheat",ore:"Ore"};
+// Two-letter resource tags used on port tokens (e.g. "2:1 Wd").
+const PORT_SHORT={wood:"Wd",brick:"Br",sheep:"Sh",wheat:"Wh",ore:"Or"};
+// Self-contained monochrome SVG icons (currentColor) used on the player cards. No emoji / icon fonts.
+const PC_ICONS={
+  // Longest Road award — a road segment with a dashed centre line
+  road:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3 5 21"/><path d="M15 3l4 18"/><path d="M12 4v2.5M12 10v2.5M12 15.5v2.5"/></svg>`,
+  // Largest Army award — a cluster of three knight helmets
+  army:`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 11V6a4 4 0 0 1 8 0v5z"/><path d="M2.5 19v-5a4 4 0 0 1 8 0v5z"/><path d="M13.5 19v-5a4 4 0 0 1 8 0v5z"/></svg>`,
+  // Cards in hand — a fanned spread of three cards
+  cards:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.4" y="9" width="8" height="11" rx="1.3" transform="rotate(-18 6.4 14.5)"/><rect x="8" y="6.2" width="8" height="12" rx="1.3"/><rect x="13.6" y="9" width="8" height="11" rx="1.3" transform="rotate(18 17.6 14.5)"/></svg>`,
+  // Development cards — a stack of face-down cards (back marked with an X)
+  dev:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 7.5v11a2 2 0 0 0 2 2h9"/><rect x="7.5" y="3.5" width="12" height="15" rx="2"/><path d="M10.5 7.5l6 7M16.5 7.5l-6 7"/></svg>`,
+  // Knights played — a single knight helmet with visor slit
+  knight:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M5 10a7 7 0 0 1 14 0v6a2 2 0 0 1-2 2h-2v2.5h-4V18H7a2 2 0 0 1-2-2z"/><path d="M5.3 10.5h13.4"/><path d="M11 13v4M13.5 13v4"/></svg>`,
+  // Generic 3:1 port — an anchor
+  anchor:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M12 7v14"/><path d="M5 13a7 7 0 0 0 14 0"/><path d="M3.5 13H6M18 13h2.5"/></svg>`,
+};
+// Perceived brightness of a #rrggbb colour — true for light colours (white, orange) that need dark text.
+function isLightColor(hex){
+  const c=hex.replace('#',''); const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+  return (0.299*r+0.587*g+0.114*b)>150;
+}
 // Development cards — playable types (VP cards are never actively played) and all types.
 const DEV_TYPES=["knight","road","plenty","mono"];
 const DEV_ALL=["knight","vp","road","plenty","mono"];
@@ -1689,39 +1743,41 @@ function renderPlayers(){
   S.players.forEach(pl=>{
     const active=(pl.i===S.cur);
     const card=document.createElement("div"); card.className="pcard"+(active?" active":"");
-    let chips="";
+    const headTone=isLightColor(PLAYER_COLORS[pl.i])?"light":"dark";
+    // Header awards — shown only while the player currently holds them.
+    let badges="";
+    if(S.longestRoad===pl.i) badges+=`<span class="pc-badge" title="Longest Road (+2 VP)">${PC_ICONS.road} +2</span>`;
+    if(S.largestArmy===pl.i) badges+=`<span class="pc-badge" title="Largest Army (+2 VP)">${PC_ICONS.army} +2</span>`;
+    // Resources bar — five equal cells in their tile colours.
+    let cells="";
     const prev=FX.prevRes?FX.prevRes[pl.i]:null;
     RES_ORDER.forEach(r=>{
       const inc=bumpOk&&prev&&pl.resources[r]>prev[r];     // tick up only when a count actually grew
-      chips+=`<span class="chip${inc?" bump":""}" style="background:${TILE_COLORS[r]};${r==='sheep'||r==='wheat'?'color:#3a2e10;':''}"><span class="c-lab">${RES_SHORT[r]}</span>${pl.resources[r]}</span>`;});
-    let hbHtml="";
-    const hs=playerHarbours(pl.i);
-    if(hs.length){
-      const counts={};
-      hs.forEach(h=>{const k=harbourLabel(h.type);counts[k]=(counts[k]||0)+1;});
-      const txt=Object.keys(counts).map(k=>k+(counts[k]>1?" ×"+counts[k]:"")).join(" · ");
-      hbHtml=`<div class="harbour-line" title="Harbours this player can trade at">⚓ ${txt}</div>`;
-    }
+      const dark=(r==='sheep'||r==='wheat');               // light tiles need dark text
+      cells+=`<div class="pc-cell${inc?" bump":""}" style="background:${TILE_COLORS[r]};color:${dark?'#3a2e10':'#fff'}">`+
+        `<span class="rl">${RES_SHORT[r]}</span><span class="rn">${pl.resources[r]}</span></div>`;});
+    // Ports — one token per distinct type, generic 3:1 first then 2:1 ports in resource order.
+    const hTypes=new Set(playerHarbours(pl.i).map(h=>h.type));
+    let tokens="";
+    if(hTypes.has("3:1")) tokens+=`<span class="pc-token" title="Generic 3:1 port">${PC_ICONS.anchor} 3:1 Any</span>`;
+    RES_ORDER.forEach(r=>{ if(hTypes.has(r)) tokens+=`<span class="pc-token" title="2:1 ${RES_SHORT[r]} port"><span class="dot" style="background:${TILE_COLORS[r]}"></span> 2:1 ${PORT_SHORT[r]}</span>`; });
     const devHeld=DEV_ALL.reduce((s,t)=>s+pl.dev[t],0);
-    let awards="";
-    if(S.longestRoad===pl.i) awards+=`<span class="award" title="Longest Road (+2 VP)">Road +2</span>`;
-    if(S.largestArmy===pl.i) awards+=`<span class="award" title="Largest Army (+2 VP)">Army +2</span>`;
     card.innerHTML=`
-      <div class="prow" style="width:100%">
-        <span class="swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>
-        <span class="pname">${PLAYER_NAMES[pl.i]}</span>
-        ${awards}
-        <span class="vp">${pl.vp}<small> VP</small></span>
+      <div class="pc-head ${headTone}" style="background:${PLAYER_COLORS[pl.i]}">
+        <span class="pc-name">${PLAYER_NAMES[pl.i]}</span>
+        <span class="pc-badges">${badges}</span>
+        <span class="pc-vp" title="Victory points"><span class="n">${pl.vp}</span><span class="l">VP</span></span>
       </div>
-      <div class="pcard-body">
-        <div class="res-chips">${chips}</div>
-        <div class="pstats">
-          <span title="Resource cards in hand">🖐 <b>${totalCards(pl.i)}</b> cards</span>
-          <span title="Longest road length">🛣 <b>${pl.roadLen||0}</b> road</span>
-          <span title="Development cards held">🃏 <b>${devHeld}</b> dev</span>
-          <span title="Knights played">⚔ <b>${pl.playedKnights}</b> knights</span>
-        </div>
-        ${hbHtml}
+      <div class="pc-res">${cells}</div>
+      <div class="pc-stats">
+        <span class="pc-stat" title="Resource cards in hand">${PC_ICONS.cards}<b>${totalCards(pl.i)}</b> cards</span>
+        <span class="pc-stat" title="Longest road length">${PC_ICONS.road}<b>${pl.roadLen||0}</b> road</span>
+        <span class="pc-stat" title="Development cards held">${PC_ICONS.dev}<b>${devHeld}</b> dev</span>
+        <span class="pc-stat" title="Knights played">${PC_ICONS.knight}<b>${pl.playedKnights}</b> knights</span>
+      </div>
+      <div class="pc-ports">
+        <span class="pc-ports-lab">Ports</span>
+        ${tokens?`<span class="pc-tokens">${tokens}</span>`:""}
       </div>`;
     box.appendChild(card);
   });
