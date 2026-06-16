@@ -11,7 +11,7 @@
   :root{
     --sea:#11414c; --sea-deep:#0b2c34; --sea-glow:#1c5e6c;
     --parchment:#f3e7cd; --parchment-2:#ece0c2; --parchment-edge:#d8c49a;
-    --pc-band:#e8d7b1; /* slightly darker beige for player-card body */
+    --pc-band:#f1e8c9; /* light beige for player-card body, stats and ports areas */
     --pc-head:#ddc99c; /* one step darker beige for the player-card header band */
     --wood:#6b4f2e; --wood-dark:#3a2a1a; --ink:#2c2117; --ink-soft:#5d4e3c;
     --gold:#e0b84a; --gold-deep:#b8902c;
@@ -210,11 +210,11 @@
   .players{display:flex; flex-direction:column; gap:11px;}
   .swatch{width:18px; height:18px; border-radius:5px; border:1.5px solid var(--wood-dark); flex:0 0 auto;}
 
-  /* Redesigned player card: darker-beige body with a still-darker header band */
+  /* Redesigned player card: light-beige body with a darker header band */
   .pcard{border-radius:14px; background:var(--pc-band); padding:7px;
     display:flex; flex-direction:column; gap:7px;
     border:1px solid rgba(107,79,46,.22); box-shadow:0 1px 3px rgba(0,0,0,.10);}
-  .pcard.active{box-shadow:0 0 0 3px var(--gold), 0 0 12px rgba(224,184,74,.45), 0 1px 4px rgba(0,0,0,.12);}
+  .pcard.active{border:2.5px solid var(--pcol); box-shadow:0 1px 4px rgba(0,0,0,.12);}
 
   /* 1) Header band — still-darker beige panel: colour swatch + name (left), badges, VP (right) */
   .pc-head{display:flex; align-items:center; gap:7px; padding:7px 10px;
@@ -251,7 +251,7 @@
   /* 4) Ports — same beige body, with a thin clipped divider above it */
   .pc-ports{position:relative; display:flex; align-items:flex-start; gap:8px; padding:7px 10px; background:var(--pc-band); border-radius:10px; flex-wrap:wrap;}
   .pc-ports::before{content:""; position:absolute; top:-4px; left:14px; right:14px; height:1px;
-    background:rgba(247,237,210,.85); border-radius:1px;}
+    background:rgba(214,193,150,.9); border-radius:1px;}
   .pc-ports-lab{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
     font-weight:700; padding-top:4px; flex:0 0 auto;}
   .pc-tokens{display:flex; flex-wrap:wrap; gap:5px; flex:1 1 auto;}
@@ -1745,6 +1745,7 @@ function renderPlayers(){
   S.players.forEach(pl=>{
     const active=(pl.i===S.cur);
     const card=document.createElement("div"); card.className="pcard"+(active?" active":"");
+    card.style.setProperty("--pcol", PLAYER_COLORS[pl.i]);   // own colour, used for the active-card border
     // Header awards — shown only while the player currently holds them.
     let badges="";
     if(S.longestRoad===pl.i) badges+=`<span class="pc-badge" title="Longest Road (+2 VP)">${PC_ICONS.road} +2</span>`;
