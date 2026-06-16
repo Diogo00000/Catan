@@ -30,7 +30,11 @@
     -webkit-font-smoothing:antialiased;
   }
   .wrap{
-    width:100%; margin:0; padding:18px; gap:20px;
+    /* Horizontal inset is a bit wider than a scrollbar so the page's vertical
+       scrollbar falls over the teal body background to the right of the panel
+       instead of clipping it; a matching left inset keeps things balanced.
+       box-sizing:border-box (set globally) means this never adds horizontal scroll. */
+    width:100%; margin:0; padding:18px 38px; gap:20px;
     display:flex; align-items:stretch;
     height:100vh; height:100dvh; overflow:hidden;
   }
