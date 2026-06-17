@@ -1499,13 +1499,28 @@ function drawStaticBoard(){
   el("stop",{offset:"0%","stop-color":"#1c5e6c"},sea);
   el("stop",{offset:"55%","stop-color":"#12434e"},sea);
   el("stop",{offset:"100%","stop-color":"#0b2c34"},sea);
+  // gradients that give the open-sea waves & boats volume (sunlit tops → shadowed troughs)
+  const waveBody=el("linearGradient",{id:"waveBody",x1:"0",y1:"0",x2:"0",y2:"1"},defs);
+  el("stop",{offset:"0%","stop-color":"#4f97a6"},waveBody);   // sunlit upper face
+  el("stop",{offset:"55%","stop-color":"#236270"},waveBody);
+  el("stop",{offset:"100%","stop-color":"#0e3a44"},waveBody); // shadowed trough
+  const foamGrad=el("linearGradient",{id:"foamGrad",x1:"0",y1:"0",x2:"0",y2:"1"},defs);
+  el("stop",{offset:"0%","stop-color":"#ffffff"},foamGrad);
+  el("stop",{offset:"100%","stop-color":"#cfe8e6"},foamGrad);
+  const hullGrad=el("linearGradient",{id:"hullGrad",x1:"0",y1:"0",x2:"0",y2:"1"},defs);
+  el("stop",{offset:"0%","stop-color":"#9a6638"},hullGrad);   // sunlit gunwale
+  el("stop",{offset:"48%","stop-color":"#5e3a20"},hullGrad);
+  el("stop",{offset:"100%","stop-color":"#2c1a0e"},hullGrad); // dark waterline
+  const sailGrad=el("linearGradient",{id:"sailGrad",x1:"0",y1:"0",x2:"1",y2:"0"},defs);
+  el("stop",{offset:"0%","stop-color":"#ffffff"},sailGrad);   // lit luff
+  el("stop",{offset:"100%","stop-color":"#b9c8c9"},sailGrad); // shaded leech
 
   // size the sea so the far-out harbour boats always fit, keeping the island centred
   const vb=boardViewBox();
   svg.setAttribute("viewBox",`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
   el("rect",{x:vb.x,y:vb.y,width:vb.w,height:vb.h,rx:10,fill:"url(#seaGrad)"},svg);
   // decorative open-sea boats & waves (behind everything else, so they never cover anything)
-  drawSeaDecor(el("g",{opacity:0.55,["pointer-events"]:"none"},svg), vb);
+  drawSeaDecor(el("g",{opacity:0.72,["pointer-events"]:"none"},svg), vb);
   // map border (decorative, on top last) — placeholder group order
   // compass rose (in water, bottom-left)
   drawCompass(el("g",{class:"compass"},svg),74,508,30);
@@ -1584,7 +1599,8 @@ function drawHarbours(g){
     el("circle",{cx:b.x,cy:b.y,r:3.6,fill:"#6f4420",stroke:"#3a2a1a",["stroke-width"]:1},g);
 
     // port marker: a wooden-rimmed disc at the dock's outer end, carrying the resource icon + ratio
-    const dc=P(0,7), dx2=dc[0], dy2=dc[1], RAD=15.5;
+    // (sized so the ratio text and resource icon both sit comfortably inside, clear of the rim)
+    const dc=P(0,7), dx2=dc[0], dy2=dc[1], RAD=17.5;
     el("circle",{cx:dx2,cy:dy2,r:RAD,fill:"#8a5a2b",stroke:"#3a2a1a",["stroke-width"]:1.4},g);   // wooden rim
     el("circle",{cx:dx2,cy:dy2,r:RAD-3,fill:discFill,stroke:"#6f4420",["stroke-width"]:0.8},g);  // resource face
     drawPortIcon(g, spec?h.type:"anchor", dx2, dy2-4, 14, ink);
@@ -1654,8 +1670,9 @@ function drawCompass(g,cx,cy,r){
   el("text",{x:cx+r+8,y:cy},g).textContent="E";
   el("text",{x:cx-r-8,y:cy},g).textContent="W";
 }
-// Muted, static open-sea decoration: a few simple sailboats and small wave marks scattered
-// in the open-water corners, kept clear of the island, docks, port discs and compass rose.
+// Static open-sea decoration: volumetric little sailboats and foam-crested waves (whitecaps)
+// scattered across the open water, kept clear of the island, docks, port discs and compass rose,
+// and drawn behind everything else so they never cover the island or harbours.
 function drawSeaDecor(g, vb){
   // farthest reach of any dock / port disc from the board centre, so we can stay outside it
   let safeR=120;
@@ -1665,39 +1682,85 @@ function drawSeaDecor(g, vb){
     const ex=b.x-a.x, ey=b.y-a.y, L=Math.hypot(ex,ey)||1;
     let nx=-ey/L, ny=ex/L; if(nx*(ox-CX0)+ny*(oy-CY0)<0){ nx=-nx; ny=-ny; }
     const fx=ox+nx*61, fy=oy+ny*61;                       // port-disc centre (matches drawHarbours)
-    safeR=Math.max(safeR, Math.hypot(fx-CX0,fy-CY0)+20);  // + disc radius
+    safeR=Math.max(safeR, Math.hypot(fx-CX0,fy-CY0)+28);  // + disc radius + slack
   });
-  const compass={x:74,y:508,r:46};
-  const spots=[
-    {x:vb.x+vb.w*0.085, y:vb.y+vb.h*0.085, boat:1},        // top-left
-    {x:vb.x+vb.w*0.915, y:vb.y+vb.h*0.085, boat:1},        // top-right
-    {x:vb.x+vb.w*0.915, y:vb.y+vb.h*0.915, boat:1},        // bottom-right
-    {x:vb.x+vb.w*0.085, y:vb.y+vb.h*0.915, boat:0},        // bottom-left (compass corner)
-    {x:vb.x+vb.w*0.5,   y:vb.y+vb.h*0.045, boat:0},        // top-middle
-    {x:vb.x+vb.w*0.96,  y:vb.y+vb.h*0.5,   boat:0},        // right-middle
-    {x:vb.x+vb.w*0.04,  y:vb.y+vb.h*0.5,   boat:0},        // left-middle
+  const compass={x:74,y:508,r:56};
+  // open water = outside island/dock reach, off the compass rose, and inside the frame margins
+  const open=(x,y)=> Math.hypot(x-CX0,y-CY0) >= safeR
+                  && Math.hypot(x-compass.x,y-compass.y) >= compass.r
+                  && x>vb.x+22 && x<vb.x+vb.w-22 && y>vb.y+22 && y<vb.y+vb.h-22;
+
+  // deterministic pseudo-random so the scene is stable between renders
+  let rnd=20240607;
+  const rand=()=>{ rnd=(rnd*9301+49297)%233280; return rnd/233280; };
+
+  // foam-crested swells spread across the whole open sea (drawn first, boats ride over them)
+  for(let i=0;i<48;i++){
+    const x=vb.x+vb.w*(0.04+0.92*rand()), y=vb.y+vb.h*(0.04+0.92*rand());
+    if(!open(x,y)) continue;
+    drawWave(g, x, y, 8+rand()*9, rand()<0.5?-1:1, i);
+  }
+
+  // a handful of little sailboats out in the open water, spread around the island
+  const boats=[
+    {x:vb.x+vb.w*0.10,  y:vb.y+vb.h*0.11,  s:1.05, flip:0},   // top-left
+    {x:vb.x+vb.w*0.90,  y:vb.y+vb.h*0.085, s:0.9,  flip:1},   // top-right
+    {x:vb.x+vb.w*0.925, y:vb.y+vb.h*0.90,  s:1.1,  flip:1},   // bottom-right
+    {x:vb.x+vb.w*0.21,  y:vb.y+vb.h*0.925, s:0.85, flip:0},   // bottom-left-ish
+    {x:vb.x+vb.w*0.50,  y:vb.y+vb.h*0.05,  s:0.8,  flip:0},   // top-middle
+    {x:vb.x+vb.w*0.965, y:vb.y+vb.h*0.45,  s:0.95, flip:1},   // right-middle
   ];
-  spots.forEach((p,i)=>{
-    if(Math.hypot(p.x-CX0,p.y-CY0) < safeR) return;        // would touch island / docks
-    if(Math.hypot(p.x-compass.x,p.y-compass.y) < compass.r) return; // over the compass rose
-    if(p.boat) drawLittleBoat(g,p.x,p.y);
-    drawWaveCluster(g,p.x,p.y,i);
-  });
+  boats.forEach((b,i)=>{ if(open(b.x,b.y)) drawBoat(g,b.x,b.y,b.s,b.flip,i); });
 }
-function drawLittleBoat(g,x,y){
-  const c="#cfe0df";
-  el("path",{d:`M${x-7},${y+1} Q${x},${y+5} ${x+7},${y+1} L${x+5},${y+4} Q${x},${y+6} ${x-5},${y+4} Z`,fill:c},g); // hull
-  el("line",{x1:x,y1:y+1,x2:x,y2:y-12,stroke:c,["stroke-width"]:1.1,["stroke-linecap"]:"round"},g);                // mast
-  el("path",{d:`M${x+0.6},${y-11} L${x+0.6},${y} L${x+8},${y} Z`,fill:c},g);                                       // mainsail
-  el("path",{d:`M${x-0.6},${y-9} L${x-0.6},${y} L${x-6},${y} Z`,fill:c},g);                                        // jib
+// A foam-crested swell: a curved body in light→dark sea tones with a white whitecap riding the
+// crest and a little spray. `dir` (±1) mirrors it so the waves don't all break the same way.
+function drawWave(g,x,y,w,dir,seed){
+  const half=w/2, h=w*0.6;
+  const wg=el("g",{transform:`translate(${x},${y})${dir<0?" scale(-1,1)":""}`},g);
+  // swell body — a rounded mound of water; vertical gradient gives it volume (lit top, dark belly)
+  el("path",{d:`M${-half},2 Q${-half*0.5},${-h} 0,${-h*0.85} `
+              +`Q${half*0.5},${-h*0.72} ${half},2 Q0,${h*0.5} ${-half},2 Z`,
+    fill:"url(#waveBody)",stroke:"#0c333c",["stroke-width"]:0.4,opacity:0.96},wg);
+  // soft inner shadow under the crest for depth
+  el("path",{d:`M${-half*0.6},${-h*0.2} Q0,${h*0.35} ${half*0.6},${-h*0.2}`,
+    fill:"none",stroke:"#0b303a",["stroke-width"]:1.4,["stroke-linecap"]:"round",opacity:0.5},wg);
+  // foam crest (whitecap) — a soft off-white ridge under a brighter white highlight
+  const crest=`M${-half*0.74},${-h*0.34} Q${-half*0.3},${-h*0.98} 0,${-h*0.86} `
+             +`Q${half*0.4},${-h*0.78} ${half*0.76},${-h*0.28}`;
+  el("path",{d:crest,fill:"none",stroke:"url(#foamGrad)",["stroke-width"]:3,["stroke-linecap"]:"round",opacity:0.95},wg);
+  el("path",{d:crest,fill:"none",stroke:"#ffffff",["stroke-width"]:1.2,["stroke-linecap"]:"round"},wg);
+  // a curl of foam at the breaking lip + a touch of spray
+  el("circle",{cx:half*0.74,cy:-h*0.3,r:1.6,fill:"#ffffff",opacity:0.95},wg);
+  if(seed%2===0){
+    el("circle",{cx:half*0.5,cy:-h*1.02,r:0.95,fill:"#ffffff",opacity:0.8},wg);
+    el("circle",{cx:half*0.16,cy:-h*1.12,r:0.7,fill:"#eef9f8",opacity:0.7},wg);
+  }
 }
-function drawWaveCluster(g,x,y,seed){
-  const c="#cfe0df", off=[[-14,16],[18,10],[6,22]];
-  off.forEach(([dx,dy],k)=>{ if(k && (seed+k)%3===2) return;            // thin the marks out a little
-    const wx=x+dx, wy=y+dy, w=10;
-    el("path",{d:`M${wx},${wy} q${w/4},${-w/3} ${w/2},0 q${w/4},${w/3} ${w/2},0`,
-      fill:"none",stroke:c,["stroke-width"]:1.2,["stroke-linecap"]:"round"},g);
-  });
+// A little sailboat with volume: a shaded hull (lit gunwale → dark waterline), a sail with a lit
+// and a shadow side, a small white foam wake at the bow, and a soft shadow/reflection on the water.
+function drawBoat(g,x,y,s,flip,seed){
+  const bg=el("g",{transform:`translate(${x},${y}) scale(${flip?-s:s},${s})`},g);
+  const hw=10;
+  // soft shadow / reflection on the water beneath the hull
+  el("ellipse",{cx:0,cy:8,rx:hw*1.05,ry:3.2,fill:"#06222a",opacity:0.4},bg);
+  el("path",{d:`M1,7 L7,16 L1,16 Z`,fill:"#0b2f38",opacity:0.28},bg);     // faint sail reflection
+  // white foam wake curling off the bow
+  el("path",{d:`M${hw-1.5},2.5 q5,0.8 7.5,3 q-4.5,0.7 -7.5,-0.6 Z`,fill:"#ffffff",opacity:0.85},bg);
+  el("path",{d:`M${hw-0.5},1.5 q3,-0.4 5,0.4`,fill:"none",stroke:"#eaf6f5",["stroke-width"]:0.9,["stroke-linecap"]:"round",opacity:0.7},bg);
+  // hull — lit gunwale down to a dark waterline (gradient = volume)
+  el("path",{d:`M${-hw},0 Q0,-2 ${hw},0 Q${hw-1},4.6 0,6.2 Q${-hw+1},4.6 ${-hw},0 Z`,
+    fill:"url(#hullGrad)",stroke:"#241408",["stroke-width"]:0.5},bg);
+  el("path",{d:`M${-hw+1.6},0.5 Q0,-0.9 ${hw-1.6},0.5`,fill:"none",stroke:"#c08b53",["stroke-width"]:0.9,["stroke-linecap"]:"round",opacity:0.85},bg); // deck highlight
+  // mast
+  el("line",{x1:0.6,y1:-1,x2:0.6,y2:-17,stroke:"#3a2a1a",["stroke-width"]:1.1,["stroke-linecap"]:"round"},bg);
+  // mainsail — lit luff to shaded leech, with a bright highlight strip along the mast for belly
+  el("path",{d:`M1.5,-16.2 C5,-12 7.6,-6 8.2,-1 L1.5,-1 Z`,fill:"url(#sailGrad)",stroke:"#9aa8a9",["stroke-width"]:0.4},bg);
+  el("path",{d:`M1.5,-16.2 C3.1,-11 3.5,-6 3.7,-1 L1.5,-1 Z`,fill:"#ffffff",opacity:0.5},bg);
+  // jib — small foresail with its own shadow side
+  el("path",{d:`M-0.4,-13.2 C-3,-9 -4.6,-4 -5.1,-1 L-0.4,-1 Z`,fill:"url(#sailGrad)",stroke:"#9aa8a9",["stroke-width"]:0.35},bg);
+  el("path",{d:`M-0.4,-13.2 C-1.7,-8 -2.1,-4 -2.3,-1 L-0.4,-1 Z`,fill:"#7f9a9b",opacity:0.4},bg);
+  // pennant at the masthead
+  el("path",{d:`M0.6,-17 l3,1 l-3,1 Z`,fill:"#c9533f"},bg);
 }
 function drawTokens(){
   layers.tokens.innerHTML="";
