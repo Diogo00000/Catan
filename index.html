@@ -1504,6 +1504,8 @@ function drawStaticBoard(){
   const vb=boardViewBox();
   svg.setAttribute("viewBox",`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
   el("rect",{x:vb.x,y:vb.y,width:vb.w,height:vb.h,rx:10,fill:"url(#seaGrad)"},svg);
+  // decorative open-sea boats & waves (behind everything else, so they never cover anything)
+  drawSeaDecor(el("g",{opacity:0.55,["pointer-events"]:"none"},svg), vb);
   // map border (decorative, on top last) — placeholder group order
   // compass rose (in water, bottom-left)
   drawCompass(el("g",{class:"compass"},svg),74,508,30);
@@ -1561,7 +1563,7 @@ function drawHarbours(g){
   harbours.forEach(h=>{
     const a=vertices[h.v1], b=vertices[h.v2];
     const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
-    // outward perpendicular bisector of the coastal edge (boat stays centred & equidistant from a,b)
+    // outward perpendicular bisector of the coastal edge (disc stays centred & equidistant from a,b)
     const ex=b.x-a.x, ey=b.y-a.y, elen=Math.hypot(ex,ey)||1;
     const tx=ex/elen, ty=ey/elen;                       // along the coast
     let nx=-ty, ny=tx;                                  // perpendicular to the edge
@@ -1571,56 +1573,75 @@ function drawHarbours(g){
     const P=(s,t)=>[cx+tx*s+nx*t, cy+ty*s+ny*t];        // local frame: s=along coast, t=out to sea
 
     const spec=(h.type!=="3:1");
-    const flagFill=spec?TILE_COLORS[h.type]:"#bda47c";  // resource colour, or neutral wood/grey for 3:1
-    const lightFlag=(h.type==="sheep"||h.type==="wheat"||h.type==="3:1");
-    const txtCol=lightFlag?"#2c2117":"#fff";            // legible text on the flag
+    const discFill=spec?TILE_COLORS[h.type]:"#b07d42";    // resource colour, or neutral wood/tan for 3:1
+    const lightDisc=(h.type==="sheep"||h.type==="wheat"); // pale faces need dark ink; all others take cream
+    const ink=lightDisc?"#2c2117":"#f5ecd8";              // icon + ratio colour that stays legible on the disc
 
-    // two wooden plank piers, mirror images, from each coastal spot out to the boat
+    // two ladder-style timber piers, mirror images, from each coastal spot out to the port disc
     drawPier(g, a.x,a.y, P(-6,-8));
     drawPier(g, b.x,b.y, P( 6,-8));
-    el("circle",{cx:a.x,cy:a.y,r:3.6,fill:"#5a3f22",stroke:"#3a2a1a",["stroke-width"]:1},g);
-    el("circle",{cx:b.x,cy:b.y,r:3.6,fill:"#5a3f22",stroke:"#3a2a1a",["stroke-width"]:1},g);
+    el("circle",{cx:a.x,cy:a.y,r:3.6,fill:"#6f4420",stroke:"#3a2a1a",["stroke-width"]:1},g);
+    el("circle",{cx:b.x,cy:b.y,r:3.6,fill:"#6f4420",stroke:"#3a2a1a",["stroke-width"]:1},g);
 
-    // a little side-view sailboat sitting at the dock head, keel toward the
-    // island (where the piers meet) and mast/sail rising out toward open sea
-    // curved wooden hull: rounded keel that sweeps up at bow and stern
-    el("path",{d:`M${P(-17,4)} Q${P(0,1)} ${P(17,4)} Q${P(14,-10)} ${P(0,-11)} Q${P(-14,-10)} ${P(-17,4)} Z`,
-      fill:"#8a5a2b",stroke:"#3a2a1a",["stroke-width"]:1.6,["stroke-linejoin"]:"round"},g);
-    // gunwale highlight following the sheer line
-    el("path",{d:`M${P(-15,3)} Q${P(0,0.5)} ${P(15,3)}`,fill:"none",
-      stroke:"#c79a5c",["stroke-width"]:2.4,["stroke-linecap"]:"round"},g);
-
-    // short mast rising from the middle of the hull out to sea
-    el("line",{x1:P(0,1.5)[0],y1:P(0,1.5)[1],x2:P(0,31)[0],y2:P(0,31)[1],
-      stroke:"#5a3f22",["stroke-width"]:2.6,["stroke-linecap"]:"round"},g);
-    el("circle",{cx:P(0,31.5)[0],cy:P(0,31.5)[1],r:2,fill:"#5a3f22"},g); // mast top knob
-
-    // wind-filled sail carrying the port info, coloured by the harbour's resource
-    el("path",{d:`M${P(0,30)} Q${P(17,25)} ${P(15,20)} Q${P(13,12)} ${P(0,11)} `+
-      `Q${P(-13,12)} ${P(-13,20)} Q${P(-12,25)} ${P(0,30)} Z`,
-      fill:flagFill,stroke:"#3a2a1a",["stroke-width"]:1.4,["stroke-linejoin"]:"round"},g);
-    // port details on the sail (kept upright & centred so they stay legible)
-    const sc=P(0,20), fx=sc[0], fy=sc[1];
-    el("text",{x:fx,y:fy-4,["text-anchor"]:"middle",["dominant-baseline"]:"central",
-      ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:10,fill:txtCol},g)
+    // port marker: a wooden-rimmed disc at the dock's outer end, carrying the resource icon + ratio
+    const dc=P(0,7), dx2=dc[0], dy2=dc[1], RAD=15.5;
+    el("circle",{cx:dx2,cy:dy2,r:RAD,fill:"#8a5a2b",stroke:"#3a2a1a",["stroke-width"]:1.4},g);   // wooden rim
+    el("circle",{cx:dx2,cy:dy2,r:RAD-3,fill:discFill,stroke:"#6f4420",["stroke-width"]:0.8},g);  // resource face
+    drawPortIcon(g, spec?h.type:"anchor", dx2, dy2-4, 14, ink);
+    el("text",{x:dx2,y:dy2+8.5,["text-anchor"]:"middle",["dominant-baseline"]:"central",
+      ["font-family"]:"'Cinzel',serif",["font-weight"]:700,["font-size"]:8.5,fill:ink},g)
       .textContent=spec?"2:1":"3:1";
-    el("text",{x:fx,y:fy+6,["text-anchor"]:"middle",["dominant-baseline"]:"central",
-      ["font-family"]:"'Outfit',sans-serif",["font-weight"]:600,["font-size"]:7,
-      ["letter-spacing"]:"0.3px",fill:txtCol},g)
-      .textContent=spec?RES_SHORT[h.type].toUpperCase():"ANY";
   });
 }
-// A wooden plank walkway (pier) from a coastal spot (x1,y1) out to a boat dock point [x2,y2].
+// A ladder/boardwalk jetty from a coastal spot (x1,y1) out to the dock head [x2,y2]:
+// two parallel timber rails with a few shorter cross-rungs (ties) spanning between them.
 function drawPier(g, x1,y1, [x2,y2]){
   const dx=x2-x1, dy=y2-y1, len=Math.hypot(dx,dy)||1;
-  const ux=dx/len, uy=dy/len, px=-uy, py=ux;            // along & across the walkway
-  const HW=4.2;                                         // half board width
+  const ux=dx/len, uy=dy/len, px=-uy, py=ux;            // along & across the jetty
+  const HW=3.4;                                         // rail half-spacing
   const c=(s,w)=>[x1+ux*s+px*w, y1+uy*s+py*w];
-  const pts=[c(0,HW),c(len,HW),c(len,-HW),c(0,-HW)];
-  el("polygon",{points:pts.join(" "),fill:"#a9824e",stroke:"#5a3f22",["stroke-width"]:1.2},g);
-  const planks=Math.max(2,Math.round(len/7));           // plank cross-lines
-  for(let i=1;i<planks;i++){const s=len*i/planks, e1=c(s,HW), e2=c(s,-HW);
-    el("line",{x1:e1[0],y1:e1[1],x2:e2[0],y2:e2[1],stroke:"#5a3f22",["stroke-width"]:0.9,opacity:.7},g);}
+  // cross-rungs (ties) first, so the rails sit over them — lighter wood
+  const rungs=Math.max(2,Math.round(len/8));
+  for(let i=1;i<rungs;i++){const s=len*i/rungs, e1=c(s,HW), e2=c(s,-HW);
+    el("line",{x1:e1[0],y1:e1[1],x2:e2[0],y2:e2[1],stroke:"#c08850",["stroke-width"]:2.1,["stroke-linecap"]:"round"},g);}
+  // two parallel rails: a darker brown edge under a medium wood-brown rail
+  [HW,-HW].forEach(w=>{const a=c(0,w), b=c(len,w);
+    el("line",{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:"#6f4420",["stroke-width"]:3.2,["stroke-linecap"]:"round"},g);
+    el("line",{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:"#a86c38",["stroke-width"]:1.8,["stroke-linecap"]:"round"},g);});
+}
+// Self-contained SVG resource icons drawn straight onto the board (no emoji / icon font),
+// centred at (cx,cy) within a size×size box, in a single legible colour.
+function drawPortIcon(g, type, cx, cy, size, color){
+  const gi=el("g",{transform:`translate(${cx},${cy}) scale(${size/24}) translate(-12,-12)`},g);
+  const F=a=>el("path",Object.assign({fill:color},a),gi);
+  const S=a=>el("path",Object.assign({fill:"none",stroke:color,["stroke-width"]:2,["stroke-linecap"]:"round",["stroke-linejoin"]:"round"},a),gi);
+  if(type==="wood"){            // pine tree
+    F({d:"M12 2 L5.5 12 H18.5 Z"});
+    F({d:"M12 7 L5 17 H19 Z"});
+    el("rect",{x:10.5,y:16,width:3,height:6,fill:color},gi);
+  }else if(type==="brick"){     // staggered brick courses
+    S({d:"M4 7 H20 V17 H4 Z"});
+    S({d:"M4 12 H20"});
+    S({d:"M12 7 V12"});
+    S({d:"M8 12 V17"}); S({d:"M16 12 V17"});
+  }else if(type==="sheep"){     // woolly body + head
+    el("ellipse",{cx:10.5,cy:13,rx:6.2,ry:4.6,fill:color},gi);
+    el("circle",{cx:17,cy:11.5,r:2.6,fill:color},gi);
+    S({d:"M8 17 V20"}); S({d:"M13 17 V20"});
+  }else if(type==="wheat"){     // sheaf of three stalks
+    S({d:"M12 21 L9 9"}); S({d:"M12 21 V8"}); S({d:"M12 21 L15 9"});
+    el("ellipse",{cx:9,cy:6.5,rx:1.7,ry:3.2,fill:color,transform:"rotate(-14 9 6.5)"},gi);
+    el("ellipse",{cx:12,cy:5.5,rx:1.7,ry:3.2,fill:color},gi);
+    el("ellipse",{cx:15,cy:6.5,rx:1.7,ry:3.2,fill:color,transform:"rotate(14 15 6.5)"},gi);
+    S({d:"M9 16 H15"});
+  }else if(type==="ore"){       // mountain range
+    F({d:"M2 20 L9 7 L13 14 L16 9 L22 20 Z"});
+  }else{                        // anchor (generic 3:1)
+    el("circle",{cx:12,cy:5,r:2.2,fill:"none",stroke:color,["stroke-width"]:2},gi);
+    S({d:"M12 7 V21"});
+    S({d:"M5 13 a7 7 0 0 0 14 0"});
+    S({d:"M4 13 H6.5 M17.5 13 H20"});
+  }
 }
 function drawCompass(g,cx,cy,r){
   // 8-point star
@@ -1632,6 +1653,51 @@ function drawCompass(g,cx,cy,r){
   el("text",{x:cx,y:cy+r+7},g).textContent="S";
   el("text",{x:cx+r+8,y:cy},g).textContent="E";
   el("text",{x:cx-r-8,y:cy},g).textContent="W";
+}
+// Muted, static open-sea decoration: a few simple sailboats and small wave marks scattered
+// in the open-water corners, kept clear of the island, docks, port discs and compass rose.
+function drawSeaDecor(g, vb){
+  // farthest reach of any dock / port disc from the board centre, so we can stay outside it
+  let safeR=120;
+  edges.filter(e=>e.hexes.length===1).forEach(e=>{
+    const a=vertices[e.v1], b=vertices[e.v2];
+    const ox=(a.x+b.x)/2, oy=(a.y+b.y)/2;
+    const ex=b.x-a.x, ey=b.y-a.y, L=Math.hypot(ex,ey)||1;
+    let nx=-ey/L, ny=ex/L; if(nx*(ox-CX0)+ny*(oy-CY0)<0){ nx=-nx; ny=-ny; }
+    const fx=ox+nx*61, fy=oy+ny*61;                       // port-disc centre (matches drawHarbours)
+    safeR=Math.max(safeR, Math.hypot(fx-CX0,fy-CY0)+20);  // + disc radius
+  });
+  const compass={x:74,y:508,r:46};
+  const spots=[
+    {x:vb.x+vb.w*0.085, y:vb.y+vb.h*0.085, boat:1},        // top-left
+    {x:vb.x+vb.w*0.915, y:vb.y+vb.h*0.085, boat:1},        // top-right
+    {x:vb.x+vb.w*0.915, y:vb.y+vb.h*0.915, boat:1},        // bottom-right
+    {x:vb.x+vb.w*0.085, y:vb.y+vb.h*0.915, boat:0},        // bottom-left (compass corner)
+    {x:vb.x+vb.w*0.5,   y:vb.y+vb.h*0.045, boat:0},        // top-middle
+    {x:vb.x+vb.w*0.96,  y:vb.y+vb.h*0.5,   boat:0},        // right-middle
+    {x:vb.x+vb.w*0.04,  y:vb.y+vb.h*0.5,   boat:0},        // left-middle
+  ];
+  spots.forEach((p,i)=>{
+    if(Math.hypot(p.x-CX0,p.y-CY0) < safeR) return;        // would touch island / docks
+    if(Math.hypot(p.x-compass.x,p.y-compass.y) < compass.r) return; // over the compass rose
+    if(p.boat) drawLittleBoat(g,p.x,p.y);
+    drawWaveCluster(g,p.x,p.y,i);
+  });
+}
+function drawLittleBoat(g,x,y){
+  const c="#cfe0df";
+  el("path",{d:`M${x-7},${y+1} Q${x},${y+5} ${x+7},${y+1} L${x+5},${y+4} Q${x},${y+6} ${x-5},${y+4} Z`,fill:c},g); // hull
+  el("line",{x1:x,y1:y+1,x2:x,y2:y-12,stroke:c,["stroke-width"]:1.1,["stroke-linecap"]:"round"},g);                // mast
+  el("path",{d:`M${x+0.6},${y-11} L${x+0.6},${y} L${x+8},${y} Z`,fill:c},g);                                       // mainsail
+  el("path",{d:`M${x-0.6},${y-9} L${x-0.6},${y} L${x-6},${y} Z`,fill:c},g);                                        // jib
+}
+function drawWaveCluster(g,x,y,seed){
+  const c="#cfe0df", off=[[-14,16],[18,10],[6,22]];
+  off.forEach(([dx,dy],k)=>{ if(k && (seed+k)%3===2) return;            // thin the marks out a little
+    const wx=x+dx, wy=y+dy, w=10;
+    el("path",{d:`M${wx},${wy} q${w/4},${-w/3} ${w/2},0 q${w/4},${w/3} ${w/2},0`,
+      fill:"none",stroke:c,["stroke-width"]:1.2,["stroke-linecap"]:"round"},g);
+  });
 }
 function drawTokens(){
   layers.tokens.innerHTML="";
