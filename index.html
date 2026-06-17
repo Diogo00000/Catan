@@ -1588,8 +1588,8 @@ function drawHarbours(g){
     const P=(s,t)=>[cx+tx*s+nx*t, cy+ty*s+ny*t];        // local frame: s=along coast, t=out to sea
 
     const spec=(h.type!=="3:1");
-    const discFill=spec?TILE_COLORS[h.type]:"#b07d42";    // resource colour, or neutral wood/tan for 3:1
-    const lightDisc=(h.type==="sheep"||h.type==="wheat"); // pale faces need dark ink; all others take cream
+    const discFill=spec?TILE_COLORS[h.type]:"#e8d3a6";    // resource colour, or pale sand/tan for the generic 3:1
+    const lightDisc=(h.type==="sheep"||h.type==="wheat"||h.type==="3:1"); // pale faces need dark ink; all others take cream
     const ink=lightDisc?"#2c2117":"#f5ecd8";              // icon + ratio colour that stays legible on the disc
 
     // two ladder-style timber piers, mirror images, from each coastal spot out to the port disc
@@ -1709,6 +1709,14 @@ function drawSeaDecor(g, vb){
     {x:vb.x+vb.w*0.21,  y:vb.y+vb.h*0.925, s:0.85, flip:0},   // bottom-left-ish
     {x:vb.x+vb.w*0.50,  y:vb.y+vb.h*0.05,  s:0.8,  flip:0},   // top-middle
     {x:vb.x+vb.w*0.965, y:vb.y+vb.h*0.45,  s:0.95, flip:1},   // right-middle
+    {x:vb.x+vb.w*0.04,  y:vb.y+vb.h*0.42,  s:0.9,  flip:0},   // left-middle
+    {x:vb.x+vb.w*0.30,  y:vb.y+vb.h*0.05,  s:0.7,  flip:1},   // top, left of centre
+    {x:vb.x+vb.w*0.72,  y:vb.y+vb.h*0.055, s:0.78, flip:1},   // top, right of centre
+    {x:vb.x+vb.w*0.055, y:vb.y+vb.h*0.78,  s:0.82, flip:0},   // lower-left
+    {x:vb.x+vb.w*0.50,  y:vb.y+vb.h*0.955, s:0.85, flip:1},   // bottom-middle
+    {x:vb.x+vb.w*0.73,  y:vb.y+vb.h*0.94,  s:0.72, flip:0},   // bottom, right of centre
+    {x:vb.x+vb.w*0.95,  y:vb.y+vb.h*0.20,  s:0.75, flip:1},   // upper-right
+    {x:vb.x+vb.w*0.93,  y:vb.y+vb.h*0.68,  s:0.88, flip:1},   // right, lower
   ];
   boats.forEach((b,i)=>{ if(open(b.x,b.y)) drawBoat(g,b.x,b.y,b.s,b.flip,i); });
 }
