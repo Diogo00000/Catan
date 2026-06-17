@@ -497,6 +497,10 @@
   .rules-cost td:first-child{font-weight:700; color:var(--wood-dark); white-space:nowrap;}
   .rules-cost tr:last-child td{border-bottom:0;}
   .rules-note{font-size:12px; color:var(--ink-soft); font-style:italic; margin:-4px 0 13px;}
+  .rules-h{display:block; background:var(--pc-head); margin:14px -30px 10px; padding:5px 30px; font-size:11px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--ink);}
+  .rules-h:first-child{margin-top:4px;}
+  .rules-hr{border:none; border-top:1px solid rgba(107,79,46,.2); margin:14px 0 0;}
+  .res-card{vertical-align:middle; margin:0 2px; display:inline-block; overflow:visible;}
 </style>
 </head>
 <body>
@@ -647,104 +651,162 @@
   <div class="modal sb-modal" id="gameOverModal"></div>
 </div>
 
+<!-- Resource card SVG symbols (hidden defs, referenced via <use>) -->
+<svg style="display:none" aria-hidden="true">
+  <defs>
+    <symbol id="rcard-wood" viewBox="0 0 16 22">
+      <rect width="16" height="22" rx="2.5" fill="#2f6b3c"/>
+      <polygon points="8,3 13.5,13 2.5,13" fill="white" opacity=".9"/>
+      <rect x="6.5" y="13" width="3" height="4.5" fill="white" opacity=".9"/>
+    </symbol>
+    <symbol id="rcard-brick" viewBox="0 0 16 22">
+      <rect width="16" height="22" rx="2.5" fill="#bf6138"/>
+      <rect x="1" y="4" width="6" height="2.5" rx=".4" fill="white" opacity=".8"/>
+      <rect x="9" y="4" width="6" height="2.5" rx=".4" fill="white" opacity=".8"/>
+      <rect x="1" y="8.5" width="3.5" height="2.5" rx=".4" fill="white" opacity=".8"/>
+      <rect x="6" y="8.5" width="4" height="2.5" rx=".4" fill="white" opacity=".8"/>
+      <rect x="12" y="8.5" width="3" height="2.5" rx=".4" fill="white" opacity=".8"/>
+      <rect x="1" y="13" width="6" height="2.5" rx=".4" fill="white" opacity=".8"/>
+      <rect x="9" y="13" width="6" height="2.5" rx=".4" fill="white" opacity=".8"/>
+    </symbol>
+    <symbol id="rcard-sheep" viewBox="0 0 16 22">
+      <rect width="16" height="22" rx="2.5" fill="#a8c459"/>
+      <ellipse cx="7.5" cy="12" rx="5" ry="3.5" fill="#3a2e10" opacity=".75"/>
+      <circle cx="12.5" cy="9.5" r="2.3" fill="#3a2e10" opacity=".75"/>
+      <rect x="5" y="15" width="2" height="3.5" rx=".4" fill="#3a2e10" opacity=".75"/>
+      <rect x="9" y="15" width="2" height="3.5" rx=".4" fill="#3a2e10" opacity=".75"/>
+    </symbol>
+    <symbol id="rcard-wheat" viewBox="0 0 16 22">
+      <rect width="16" height="22" rx="2.5" fill="#e3b23c"/>
+      <rect x="7" y="14" width="2" height="5" fill="#3a2e10" opacity=".7"/>
+      <rect x="6" y="12" width="4" height="2.5" rx=".5" fill="#3a2e10" opacity=".7"/>
+      <rect x="7" y="8" width="2" height="5" fill="#3a2e10" opacity=".7"/>
+      <ellipse cx="8" cy="6" rx="1.8" ry="3" fill="#3a2e10" opacity=".7"/>
+      <line x1="8" y1="10" x2="4" y2="6.5" stroke="#3a2e10" stroke-width="1.2" opacity=".7"/>
+      <ellipse cx="3" cy="5" rx="1.3" ry="2.2" fill="#3a2e10" opacity=".7" transform="rotate(-25 3 5)"/>
+      <line x1="8" y1="10" x2="12" y2="6.5" stroke="#3a2e10" stroke-width="1.2" opacity=".7"/>
+      <ellipse cx="13" cy="5" rx="1.3" ry="2.2" fill="#3a2e10" opacity=".7" transform="rotate(25 13 5)"/>
+    </symbol>
+    <symbol id="rcard-ore" viewBox="0 0 16 22">
+      <rect width="16" height="22" rx="2.5" fill="#74808d"/>
+      <polygon points="8,3 14,16 2,16" fill="white" opacity=".85"/>
+      <polygon points="12.5,7 16,16 9,16" fill="white" opacity=".55"/>
+    </symbol>
+  </defs>
+</svg>
+
 <!-- Rules / How-to-play panel -->
 <div class="overlay hidden" id="rulesOverlay">
   <div class="modal rules-modal" id="rulesModal">
     <button class="btn-ghost rules-close" id="rulesCloseTop">Close ✕</button>
     <h2 class="sb-title">How to Play</h2>
-    <div class="sb-sub">Settlers of the Island — quick reference</div>
+    <div class="sb-sub">Settlers of Catan - Quick Guide</div>
 
     <div class="rules-sec">
-      <h3 class="sb-h">Goal</h3>
-      <p>Be the first player to reach <b>10 victory points</b>. Points come from your settlements and cities on the board, plus the special awards and Victory Point cards described below. The game ends the instant someone reaches 10 on their turn.</p>
 
-      <h3 class="sb-h">Setup</h3>
+      <h3 class="rules-h" style="margin-top:4px">Goal</h3>
+      <p>Be the first player to reach <b>10 victory points</b>. Points come from your settlements and cities on the board, plus the special awards and Victory Point cards described below. The game ends the instant someone reaches 10 on their turn.</p>
+      <hr class="rules-hr">
+
+      <h3 class="rules-h">Setup</h3>
       <p>Play happens in <b>snake order</b>. Going around the table once, each player places a settlement and a road. Then, in reverse order, each player places a <b>second</b> settlement and road. So everyone ends up with 2 settlements and 2 roads before normal turns begin.</p>
       <ul>
-        <li>Your <b>second</b> settlement immediately earns you one resource from each hex touching it — your starting hand.</li>
-        <li>The usual placement rules apply during setup, except your first roads/settlements don't yet need to connect to anything.</li>
+        <li>Your second settlement immediately earns you one resource from each hex touching it, which will be your starting hand.</li>
+        <li>The usual placement rules apply during setup. However, your first two roads and settlements don't yet need to connect to anything.</li>
       </ul>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">The Board</h3>
+      <h3 class="rules-h">The Board</h3>
       <p>The island is a ring of hexes. Each producing hex shows a resource and a number token. When that number is rolled, the hex produces its resource for every settlement and city touching it.</p>
       <ul>
-        <li><b>Resources:</b> wood, brick, sheep, wheat and ore.</li>
+        <li>Resources: wood, brick, sheep, wheat and ore.</li>
         <li>The <b>desert</b> produces nothing and is where the <b>robber</b> starts.</li>
-        <li>With <b>5–6 players</b> the larger extension board is used, with more hexes and number tokens.</li>
+        <li>With <b>5 or 6 players</b>, the larger extension board is used, with more hexes and number tokens.</li>
       </ul>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">A Turn</h3>
+      <h3 class="rules-h">A Turn</h3>
       <ul>
-        <li><b>(Optional) Play one development card</b> — you may do this before rolling.</li>
-        <li><b>Roll the dice.</b> Every settlement on a matching hex collects <b>1</b> resource; every city collects <b>2</b>.</li>
+        <li><b>(Optional) Play one development card.</b> You may do this before rolling.</li>
+        <li><b>Roll the dice.</b> Every settlement on a matching hex collects <b>1</b> resource, and every city collects <b>2</b>.</li>
         <li><b>Build, trade, and/or play a development card</b> (if you haven't already played one this turn).</li>
         <li><b>End your turn</b> and pass to the next player.</li>
       </ul>
-      <p class="rules-note">Only one development card may be played per turn — before <em>or</em> after the roll — and never on the same turn you bought it.</p>
+      <p class="rules-note">Only one development card may be played per turn, before or after the roll, and never on the same turn you bought it.</p>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">Rolling a 7</h3>
+      <h3 class="rules-h">Rolling a 7</h3>
       <ul>
         <li>No resources are produced.</li>
         <li>Every player holding <b>more than 7 cards</b> discards <b>half</b> (rounded down) back to the bank.</li>
         <li>The roller moves the <b>robber</b> to a new hex and <b>steals one random card</b> from an opponent with a settlement or city touching that hex.</li>
         <li>The robber <b>blocks its hex</b> from producing anything until it is moved again (by another 7 or a Knight).</li>
       </ul>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">Building</h3>
+      <h3 class="rules-h">Building</h3>
       <table class="rules-cost">
         <tr><th>Build</th><th>Cost</th></tr>
-        <tr><td>Road</td><td>1 wood + 1 brick</td></tr>
-        <tr><td>Settlement</td><td>1 wood + 1 brick + 1 sheep + 1 wheat</td></tr>
-        <tr><td>City</td><td>3 ore + 2 wheat</td></tr>
-        <tr><td>Development card</td><td>1 ore + 1 wheat + 1 sheep</td></tr>
+        <tr><td>Road</td><td>1 <svg class="res-card" width="16" height="22" aria-label="wood"><use href="#rcard-wood"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="brick"><use href="#rcard-brick"/></svg></td></tr>
+        <tr><td>Settlement</td><td>1 <svg class="res-card" width="16" height="22" aria-label="wood"><use href="#rcard-wood"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="brick"><use href="#rcard-brick"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="sheep"><use href="#rcard-sheep"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="wheat"><use href="#rcard-wheat"/></svg></td></tr>
+        <tr><td>City</td><td>3 <svg class="res-card" width="16" height="22" aria-label="ore"><use href="#rcard-ore"/></svg> + 2 <svg class="res-card" width="16" height="22" aria-label="wheat"><use href="#rcard-wheat"/></svg></td></tr>
+        <tr><td>Development card</td><td>1 <svg class="res-card" width="16" height="22" aria-label="ore"><use href="#rcard-ore"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="wheat"><use href="#rcard-wheat"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="sheep"><use href="#rcard-sheep"/></svg></td></tr>
       </table>
       <ul>
-        <li>A <b>settlement</b> must connect to one of your own roads, and can't sit next to another settlement or city — there must be at least one empty intersection between them (the <b>distance rule</b>).</li>
-        <li>A <b>city</b> upgrades one of your existing settlements (and then collects 2 of each matching resource instead of 1).</li>
+        <li>A <b>settlement</b> must connect to one of your own roads, and can't sit next to another settlement or city. There must be at least two empty intersections or roads between them.</li>
+        <li>A <b>city</b> upgrades one of your existing settlements, and then collects 2 of each matching resource instead of 1.</li>
       </ul>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">Victory Points</h3>
+      <h3 class="rules-h">Victory Points</h3>
       <ul>
-        <li><b>Settlement</b> — 1 point each.</li>
-        <li><b>City</b> — 2 points each.</li>
-        <li><b>Longest Road</b> — 2 points.</li>
-        <li><b>Largest Army</b> — 2 points.</li>
-        <li><b>Victory Point card</b> — 1 point each (kept hidden until you win).</li>
+        <li>Settlement: 1 point each.</li>
+        <li>City: 2 points each.</li>
+        <li>Longest Road (starting at a sequence of five continuous roads): 2 points.</li>
+        <li>Largest Army (starting at three played Knight cards): 2 points.</li>
+        <li>Victory Point card: 1 point each (kept hidden until you win).</li>
       </ul>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">Trading</h3>
-      <p>You may trade on your turn, <b>after rolling</b>:</p>
+      <h3 class="rules-h">Trading</h3>
+      <p>You may trade on your turn, after rolling:</p>
       <ul>
-        <li><b>Bank</b> — trade 4 identical resources for any 1 resource (4:1).</li>
-        <li><b>Harbours</b> — 3:1 on a generic harbour, or 2:1 for a specific resource, if you have a settlement or city on that harbour.</li>
-        <li><b>Players</b> — make direct trades with other players for any resources you both agree on.</li>
+        <li><b>Bank</b> - trade 4 identical resources for any 1 resource (4:1).</li>
+        <li><b>Harbours</b> - 3:1 on a generic harbour, or 2:1 for a specific resource, if you have a settlement or city on that harbour.</li>
+        <li><b>Players</b> - make direct trades with other players for any resources you both agree on.</li>
       </ul>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">Development Cards</h3>
+      <h3 class="rules-h">Development Cards</h3>
       <ul>
-        <li><b>Knight</b> — move the robber and steal a card, just like rolling a 7. Playing <b>3 Knights</b> earns Largest Army.</li>
-        <li><b>Victory Point</b> — +1 victory point, kept hidden.</li>
-        <li><b>Road Building</b> — place 2 roads for free.</li>
-        <li><b>Year of Plenty</b> — take any 2 resources from the bank.</li>
-        <li><b>Monopoly</b> — name one resource; every other player hands you all of theirs.</li>
+        <li><b>Knight:</b> move the robber and steal a card, just like rolling a 7. Playing 3 Knights earns Largest Army.</li>
+        <li><b>Victory Point:</b> plus 1 victory point, kept hidden until you win.</li>
+        <li><b>Road Building:</b> place 2 roads for free.</li>
+        <li><b>Year of Plenty:</b> take any 2 resources from the bank.</li>
+        <li><b>Monopoly:</b> name one resource, every other player hands you all of theirs.</li>
       </ul>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">Longest Road</h3>
-      <p>The first player to build a continuous road of <b>5 or more</b> segments takes the <b>+2 VP</b> Longest Road award. It passes to any player who later builds a <b>strictly longer</b> road.</p>
+      <h3 class="rules-h">Longest Road</h3>
+      <p>The first player to build a continuous road of <b>5 or more</b> segments takes the Longest Road award, which earns an extra <b>2 VP</b>. It passes to any player who later builds a strictly longer road.</p>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">Largest Army</h3>
-      <p>The first player to play <b>3 Knights</b> takes the <b>+2 VP</b> Largest Army award. It passes to any player who later plays <b>more</b> Knights.</p>
+      <h3 class="rules-h">Largest Army</h3>
+      <p>The first player to play <b>3 Knights</b> takes the Largest Army award, which earns an extra <b>2 VP</b>. It passes to any player who later plays more Knights.</p>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">The Bank</h3>
-      <p>The bank holds <b>19 of each</b> resource. If a roll would pay out more of a resource than remains, then: a <b>single</b> owed player takes whatever is left; but if <b>several</b> players are owed that resource and there isn't enough for all of them, <b>none</b> of them receive it.</p>
+      <h3 class="rules-h">The Bank</h3>
+      <p>The bank holds <b>19 of each</b> resource. If a roll would pay out more of a resource than remains, then a single owed player takes whatever is left. However, if several players are owed that resource and there isn't enough for all of them, none of them receive it.</p>
+      <hr class="rules-hr">
 
-      <h3 class="sb-h">This App's Controls</h3>
+      <h3 class="rules-h">Game Controls</h3>
       <ul>
-        <li><b>Manual vs Auto mode</b> — In Manual mode you make every decision for the active seat. In Auto · watch mode each seat plays itself while you watch the game unfold.</li>
-        <li><b>Pause &amp; Speed</b> — While auto-playing, use Pause to stop the action and the Speed buttons (Slow / Normal / Fast) to set how quickly the bots take their plays.</li>
-        <li><b>Stats view</b> — Switch the board area to the live Stats tab to see roll-frequency and resource-production figures update as the game goes.</li>
-        <li><b>Rewind / Replay</b> — Available when the game is paused or in Manual mode. Drag the timeline or use the step buttons to scrub back through every play, then "Return to present" to rejoin the live game.</li>
+        <li><b>Manual vs Auto mode:</b> In Manual mode you make every decision for the active seat. In Auto mode each seat plays itself while you watch the game unfold.</li>
+        <li><b>Pause &amp; Speed:</b> While auto-playing, use Pause to stop the action and the Speed buttons (Slow / Normal / Fast) to set how quickly the bots take their plays.</li>
+        <li><b>Stats view:</b> Switch the board area to the live Stats tab to see roll-frequency and resource-production figures update as the game goes.</li>
+        <li><b>Rewind / Replay:</b> Available when the game is paused or in Manual mode. Drag the timeline or use the step buttons to go back through every play, then "Return to present" to rejoin the live game.</li>
       </ul>
+
     </div>
 
     <div class="sb-footer">
