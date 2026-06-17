@@ -496,6 +496,8 @@
   .rules-cost th{font-size:9.5px; letter-spacing:.7px; text-transform:uppercase; color:var(--ink-soft); font-weight:700;}
   .rules-cost td:first-child{font-weight:700; color:var(--wood-dark); white-space:nowrap;}
   .rules-cost tr:last-child td{border-bottom:0;}
+  .rules-cost .cost-cards{display:grid; grid-template-columns:repeat(5,18px); gap:5px; align-items:center;}
+  .rules-cost .cost-cards .res-card{margin:0; display:block;}
   .rules-note{font-size:12px; color:var(--ink-soft); font-style:italic; margin:-4px 0 13px;}
   .rules-h{display:block; background:var(--pc-head); margin:14px -30px 10px; padding:5px 30px; font-size:11px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--ink);}
   .rules-h:first-child{margin-top:4px;}
@@ -747,10 +749,10 @@
       <h3 class="rules-h">Building</h3>
       <table class="rules-cost">
         <tr><th>Build</th><th>Cost</th></tr>
-        <tr><td>Road</td><td>1 <svg class="res-card" width="16" height="22" aria-label="wood"><use href="#rcard-wood"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="brick"><use href="#rcard-brick"/></svg></td></tr>
-        <tr><td>Settlement</td><td>1 <svg class="res-card" width="16" height="22" aria-label="wood"><use href="#rcard-wood"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="brick"><use href="#rcard-brick"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="sheep"><use href="#rcard-sheep"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="wheat"><use href="#rcard-wheat"/></svg></td></tr>
-        <tr><td>City</td><td>3 <svg class="res-card" width="16" height="22" aria-label="ore"><use href="#rcard-ore"/></svg> + 2 <svg class="res-card" width="16" height="22" aria-label="wheat"><use href="#rcard-wheat"/></svg></td></tr>
-        <tr><td>Development card</td><td>1 <svg class="res-card" width="16" height="22" aria-label="ore"><use href="#rcard-ore"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="wheat"><use href="#rcard-wheat"/></svg> + 1 <svg class="res-card" width="16" height="22" aria-label="sheep"><use href="#rcard-sheep"/></svg></td></tr>
+        <tr><td>Road</td><td><div class="cost-cards"><svg class="res-card" width="18" height="25" aria-label="wood"><use href="#rcard-wood"/></svg><svg class="res-card" width="18" height="25" aria-label="brick"><use href="#rcard-brick"/></svg></div></td></tr>
+        <tr><td>Settlement</td><td><div class="cost-cards"><svg class="res-card" width="18" height="25" aria-label="wood"><use href="#rcard-wood"/></svg><svg class="res-card" width="18" height="25" aria-label="brick"><use href="#rcard-brick"/></svg><svg class="res-card" width="18" height="25" aria-label="sheep"><use href="#rcard-sheep"/></svg><svg class="res-card" width="18" height="25" aria-label="wheat"><use href="#rcard-wheat"/></svg></div></td></tr>
+        <tr><td>City</td><td><div class="cost-cards"><svg class="res-card" width="18" height="25" aria-label="ore"><use href="#rcard-ore"/></svg><svg class="res-card" width="18" height="25" aria-label="ore"><use href="#rcard-ore"/></svg><svg class="res-card" width="18" height="25" aria-label="ore"><use href="#rcard-ore"/></svg><svg class="res-card" width="18" height="25" aria-label="wheat"><use href="#rcard-wheat"/></svg><svg class="res-card" width="18" height="25" aria-label="wheat"><use href="#rcard-wheat"/></svg></div></td></tr>
+        <tr><td>Development card</td><td><div class="cost-cards"><svg class="res-card" width="18" height="25" aria-label="ore"><use href="#rcard-ore"/></svg><svg class="res-card" width="18" height="25" aria-label="wheat"><use href="#rcard-wheat"/></svg><svg class="res-card" width="18" height="25" aria-label="sheep"><use href="#rcard-sheep"/></svg></div></td></tr>
       </table>
       <ul>
         <li>A <b>settlement</b> must connect to one of your own roads, and can't sit next to another settlement or city. There must be at least two empty intersections or roads between them.</li>
