@@ -2243,14 +2243,7 @@ function renderReplayView(){
   renderReplayBar();
 }
 function renderReplayActions(){
-  const box=$("actions"); box.innerHTML="";
-  const tip=document.createElement("div");
-  tip.className="bot-tip"; tip.style.gridColumn="span 2";
-  tip.textContent="👁 Viewing play "+(REPLAY.idx+1)+" of "+REPLAY.snaps.length+" — the live game is untouched.";
-  box.appendChild(tip);
-  const b=document.createElement("button");
-  b.className="btn primary span2"; b.textContent="Return to present";
-  b.addEventListener("click",returnToPresent); box.appendChild(b);
+  const box=$("actions"); box.innerHTML="";   // stay empty while reviewing the past
 }
 function renderReplayBar(){
   const sec=$("replaySection"); if(!sec||!S) return;
