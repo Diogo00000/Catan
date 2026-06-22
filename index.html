@@ -590,16 +590,8 @@
         <input type="range" id="replaySlider" class="replay-slider" min="0" max="0" value="0" step="1"
           aria-label="Replay timeline">
         <div class="replay-ctl">
-          <button class="seg" id="replayFirst" title="First play">|◀</button>
           <button class="seg" id="replayPrev" title="Previous play">◀</button>
-          <button class="seg" id="replayPlay" title="Play / pause the replay">▶</button>
-          <button class="seg" id="replayNext" title="Next play">▶|</button>
-          <span class="spd-lab">Speed</span>
-          <div class="seg-group" id="replaySpdGroup">
-            <button class="seg rspd" data-ms="1700">Slow</button>
-            <button class="seg rspd" data-ms="1000">Normal</button>
-            <button class="seg rspd" data-ms="450">Fast</button>
-          </div>
+          <button class="seg" id="replayNext" title="Next play">▶</button>
         </div>
         <div class="replay-label" id="replayLabel"></div>
       </div>
@@ -2236,26 +2228,6 @@ function returnToPresent(){
   renderAll();                                      // live render re-enables controls & bots
 }
 function stopReplayPlaying(){ REPLAY.playing=false; clearTimeout(REPLAY.timer); }
-function toggleReplayPlay(){
-  if(!replayAvailable()) return;
-  if(REPLAY.playing){ stopReplayPlaying(); renderReplayBar(); return; }
-  let i=replayCurrentIndex();
-  if(i>=REPLAY.snaps.length-1) i=0;                 // restart from the top if sitting at the end
-  REPLAY.playing=true;
-  enterReplay(i);
-  replayTick();
-}
-function replayTick(){
-  clearTimeout(REPLAY.timer);
-  if(!REPLAY.playing) return;
-  REPLAY.timer=setTimeout(()=>{
-    if(!REPLAY.playing) return;
-    const next=replayCurrentIndex()+1;
-    if(next>=REPLAY.snaps.length-1){ stopReplayPlaying(); returnToPresent(); return; }  // reached the end → live
-    enterReplay(next);
-    replayTick();
-  }, REPLAY.speed);
-}
 // Render a chosen snapshot read-only: swap S to a throwaway copy, draw, then restore.
 function renderReplayView(){
   const snap=REPLAY.snaps[REPLAY.idx];
@@ -2286,14 +2258,9 @@ function renderReplayBar(){
   const wrap=sec.querySelector(".replay"); if(wrap) wrap.classList.toggle("disabled",!avail);
   const sl=$("replaySlider");
   sl.max=Math.max(0,n-1); sl.value=Math.max(0,cur); sl.disabled=!avail||n<=1;
-  $("replayFirst").disabled=!avail||cur<=0;
   $("replayPrev").disabled =!avail||cur<=0;
   $("replayNext").disabled =!avail||cur>=n-1;
-  $("replayPlay").disabled =!avail||n<=1;
-  $("replayPlay").textContent=REPLAY.playing?"⏸":"▶";
-  $("replayPlay").classList.toggle("sel",REPLAY.playing);
   $("replayLive").disabled =!avail||!REPLAY.viewing;
-  document.querySelectorAll(".rspd").forEach(b=>{ b.disabled=!avail; b.classList.toggle("sel",+b.dataset.ms===REPLAY.speed); });
   if(n===0){ $("replayCount").textContent="—"; $("replayLabel").textContent=""; }
   else if(REPLAY.viewing){
     $("replayCount").textContent="Play "+(cur+1)+" of "+n;
@@ -3239,12 +3206,9 @@ $("modeAuto").addEventListener("click",()=>setWatch(true));
 $("pauseBtn").addEventListener("click",togglePause);
 document.querySelectorAll(".spd").forEach(b=>b.addEventListener("click",()=>{ speedMs=+b.dataset.ms; renderAutoBar(); scheduleBot(); }));
 $("replaySlider").addEventListener("input",e=>enterReplay(+e.target.value));
-$("replayFirst").addEventListener("click",()=>enterReplay(0));
 $("replayPrev").addEventListener("click",()=>enterReplay(replayCurrentIndex()-1));
 $("replayNext").addEventListener("click",()=>enterReplay(replayCurrentIndex()+1));
-$("replayPlay").addEventListener("click",toggleReplayPlay);
 $("replayLive").addEventListener("click",returnToPresent);
-document.querySelectorAll(".rspd").forEach(b=>b.addEventListener("click",()=>{ REPLAY.speed=+b.dataset.ms; renderReplayBar(); if(REPLAY.playing) replayTick(); }));
 // ---- Sound controls ----
 const soundBtn=$("soundBtn"), volSlider=$("volSlider");
 function refreshSoundUI(){
