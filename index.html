@@ -173,6 +173,17 @@
     background:linear-gradient(180deg, rgba(107,79,46,.10), transparent), var(--parchment);
   }
   .title{font-family:'Cinzel',Georgia,serif; font-weight:700; font-size:26px; letter-spacing:5px; margin:0; color:var(--wood-dark); text-align:center;}
+  /* ---- Connection / room indicator (top of side panel) ---- */
+  .conn-bar{display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding:7px 18px; font-size:10.5px; color:var(--ink-soft);
+    border-bottom:1px solid rgba(107,79,46,.18); background:rgba(107,79,46,.05);}
+  .conn-dot{width:8px; height:8px; border-radius:50%; flex:0 0 auto;
+    background:#b54b3a; box-shadow:0 0 0 2px rgba(181,75,58,.18);}
+  .conn-bar.online .conn-dot{background:#3a8a4a; box-shadow:0 0 0 2px rgba(58,138,74,.18);}
+  .conn-room{font-weight:600; color:var(--ink); letter-spacing:.3px;}
+  .conn-room code{font-family:'Outfit',monospace; background:rgba(107,79,46,.12);
+    padding:1px 6px; border-radius:5px; letter-spacing:1px;}
+  .conn-who{margin-left:auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   /* ---- Controls bar (sound left, Rules / New game right) ---- */
   .controls-bar{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
   .sound-ctl{display:flex; align-items:center; gap:8px;}
@@ -522,6 +533,12 @@
   <aside class="panel">
     <div class="panel-head">
       <h1 class="title">CATAN</h1>
+    </div>
+
+    <div class="conn-bar" id="connBar" title="Real-time connection status">
+      <span class="conn-dot"></span>
+      <span class="conn-room">Room <code id="connRoom">…</code></span>
+      <span class="conn-who" id="connWho">connecting…</span>
     </div>
 
     <div class="section controls-bar">
@@ -3222,6 +3239,95 @@ assignTiles();
 assignHarbours();
 drawStaticBoard();
 renderSetup();
+</script>
+
+<!-- ───────────────────────────────────────────────────────────────────
+     Multiplayer plumbing (step 1): room + live "who's here" indicator.
+     This is intentionally isolated from the game logic above. It only
+     touches the #connBar indicator and never affects how the game plays.
+     If socket.io / the server isn't reachable, the game runs normally
+     single-player and the indicator simply shows "disconnected".
+     ─────────────────────────────────────────────────────────────────── -->
+<script src="/socket.io/socket.io.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  var connBar  = document.getElementById('connBar');
+  var roomEl   = document.getElementById('connRoom');
+  var whoEl    = document.getElementById('connWho');
+  if (!connBar || !roomEl || !whoEl) return;
+
+  // ---- Room code: read from ?room=, or generate one and put it in the URL
+  // so the page becomes a shareable link.
+  function makeRoomCode(){
+    var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
+    var s = '';
+    for (var i = 0; i < 5; i++){
+      s += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+    }
+    return s;
+  }
+
+  var params = new URLSearchParams(window.location.search);
+  var room = (params.get('room') || '').trim();
+  if (!room){
+    room = makeRoomCode();
+    params.set('room', room);
+    var newUrl = window.location.pathname + '?' + params.toString() + window.location.hash;
+    // Don't reload — just update the address bar so the link is shareable.
+    window.history.replaceState(null, '', newUrl);
+  }
+  roomEl.textContent = room;
+
+  // ---- Indicator rendering -------------------------------------------------
+  function setDisconnected(msg){
+    connBar.classList.remove('online');
+    whoEl.textContent = msg || 'disconnected';
+  }
+
+  function renderRoster(members){
+    connBar.classList.add('online');
+    if (!Array.isArray(members) || members.length === 0){
+      whoEl.textContent = 'connected';
+      return;
+    }
+    var names = members.map(function(m){
+      return (m && m.name) ? m.name : 'Player';
+    });
+    whoEl.textContent = names.length + ' here · ' + names.join(', ');
+  }
+
+  // ---- Connect (same origin). If io() is unavailable, stay single-player. --
+  if (typeof io !== 'function'){
+    setDisconnected('offline (no server)');
+    return;
+  }
+
+  var socket;
+  try {
+    socket = io({ reconnection: true });
+  } catch (e){
+    setDisconnected('offline');
+    return;
+  }
+
+  socket.on('connect', function(){
+    socket.emit('join', { room: room, name: 'Player' });
+  });
+
+  socket.on('roster', function(members){
+    renderRoster(members);
+  });
+
+  socket.on('disconnect', function(){
+    setDisconnected('disconnected');
+  });
+
+  socket.on('connect_error', function(){
+    setDisconnected('offline (single-player)');
+  });
+})();
 </script>
 </body>
 </html>
