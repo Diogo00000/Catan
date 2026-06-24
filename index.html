@@ -750,16 +750,24 @@
   </div>
 </div>
 
+<!-- Game logic engine (no DOM). Loaded BEFORE the main game script below, which
+     drives all rendering / input and calls into the engine for state & rules. -->
+<script src="engine.js"></script>
 <script>
 "use strict";
 const SVGNS="http://www.w3.org/2000/svg";
 const el=(tag,attrs={},parent)=>{const e=document.createElementNS(SVGNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;};
 
-/* ---------------- Static data ---------------- */
+/* ---------------- Engine handle + shared constants ----------------
+   All game logic lives in engine.js. The UI keeps a single game-state instance
+   (S) created via the engine and calls into it for every state change and rule. */
+const E=CatanEngine;
+const {RES_ORDER, RES_SHORT, COST, LIMIT, DEV_TYPES, DEV_ALL, DEV_NAME}=E;
+const {R, CX0, CY0}=E.GEO;   // geometry constants the renderer still needs
+
+/* ---------------- Static (presentation-only) data ---------------- */
 const TILE_COLORS={wood:"#2f6b3c",brick:"#bf6138",sheep:"#a8c459",wheat:"#e3b23c",ore:"#74808d",desert:"#d9c08c"};
 const RES_LABEL={wood:"Wood",brick:"Brick",sheep:"Sheep",wheat:"Wheat",ore:"Ore"};
-const RES_ORDER=["wood","brick","sheep","wheat","ore"];
-const RES_SHORT={wood:"Wood",brick:"Brick",sheep:"Sheep",wheat:"Wheat",ore:"Ore"};
 // Two-letter resource tags used on port tokens (e.g. "2:1 Wd").
 const PORT_SHORT={wood:"Wd",brick:"Br",sheep:"Sh",wheat:"Wh",ore:"Or"};
 // Self-contained monochrome SVG icons (currentColor) used on the player cards. No emoji / icon fonts.
@@ -777,10 +785,6 @@ const PC_ICONS={
   // Generic 3:1 port — an anchor
   anchor:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M12 7v14"/><path d="M5 13a7 7 0 0 0 14 0"/><path d="M3.5 13H6M18 13h2.5"/></svg>`,
 };
-// Development cards — playable types (VP cards are never actively played) and all types.
-const DEV_TYPES=["knight","road","plenty","mono"];
-const DEV_ALL=["knight","vp","road","plenty","mono"];
-const DEV_NAME={knight:"Knight",vp:"Victory Point",road:"Road Building",plenty:"Year of Plenty",mono:"Monopoly"};
 // Available player colours — each may be picked by only one player.
 const PALETTE=[
   {name:"Red",hex:"#c0392b"},
@@ -790,16 +794,9 @@ const PALETTE=[
   {name:"Brown",hex:"#8a5a2b"},
   {name:"White",hex:"#efe9dc"},
 ];
-// Populated from the setup screen when a game starts; indexed by player number.
+// Populated from the engine's game-state when a game (or the idle board) is created.
 let PLAYER_COLORS=PALETTE.slice(0,4).map(c=>c.hex);
 let PLAYER_NAMES=PALETTE.slice(0,4).map(c=>c.name);
-const COST={
-  road:{wood:1,brick:1},
-  settlement:{wood:1,brick:1,sheep:1,wheat:1},
-  city:{ore:3,wheat:2},
-  dev:{ore:1,wheat:1,sheep:1}
-};
-const LIMIT={settlement:5,city:4,road:15};
 
 /* ================= SOUND & ANIMATION (final polish) =================
    Sounds are synthesised live with the Web Audio API — no external files, so the
@@ -881,108 +878,40 @@ const SFX=(function(){
   };
 })();
 
-/* ---------------- Board geometry ---------------- */
-const R=48, W=Math.sqrt(3)*R, VD=1.5*R, CX0=300, CY0=295;
-const COUNTS_SMALL=[3,4,5,4,3];        // 19-hex board (3-4 players)
-const COUNTS_LARGE=[3,4,5,6,5,4,3];    // 30-hex 5-6 extension board (5-6 players)
-let COUNTS=COUNTS_SMALL;
+/* ---------------- Board geometry (built by the engine) ----------------
+   These mirror the current game-state's geometry so the renderer can keep
+   reading them as before; they are re-pointed whenever a game (or the idle
+   board) is created. */
 let hexes=[], vertices=[], edges=[], harbours=[];
 
-function buildGeometry(){
-  hexes=[]; vertices=[]; edges=[];
-  const vmap=new Map(), emap=new Map();
-  const vkey=(x,y)=>Math.round(x)+","+Math.round(y);
-  const ekey=(a,b)=>a<b?a+"-"+b:b+"-"+a;
-  const getV=(x,y)=>{const k=vkey(x,y);if(vmap.has(k))return vmap.get(k);
-    const v={id:vertices.length,x,y,hexes:[],edges:[],adj:[]};vertices.push(v);vmap.set(k,v);return v;};
-  const getE=(a,b,hi)=>{const k=ekey(a,b);
-    if(emap.has(k)){const e=emap.get(k);if(!e.hexes.includes(hi))e.hexes.push(hi);return e;}
-    const e={id:edges.length,v1:Math.min(a,b),v2:Math.max(a,b),hexes:[hi]};edges.push(e);emap.set(k,e);return e;};
-  COUNTS.forEach((count,row)=>{
-    const y=CY0+(row-(COUNTS.length-1)/2)*VD, xStart=CX0-(count-1)/2*W;
-    for(let i=0;i<count;i++) hexes.push({cx:xStart+i*W,cy:y,corners:[],edgeIds:[]});
-  });
-  hexes.forEach((h,hi)=>{
-    for(let k=0;k<6;k++){
-      const ang=(-90+60*k)*Math.PI/180;
-      const v=getV(h.cx+R*Math.cos(ang),h.cy+R*Math.sin(ang));
-      h.corners.push(v.id); v.hexes.push(hi);
-    }
-    for(let k=0;k<6;k++){
-      const a=h.corners[k], b=h.corners[(k+1)%6];
-      const e=getE(a,b,hi); h.edgeIds.push(e.id);
-    }
-  });
-  edges.forEach(e=>{
-    vertices[e.v1].edges.push(e.id); vertices[e.v2].edges.push(e.id);
-    vertices[e.v1].adj.push(e.v2); vertices[e.v2].adj.push(e.v1);
-  });
-}
-
-function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
-
-function assignTiles(){
-  let bag, nums;
-  if(hexes.length===30){
-    // 5-6 extension board: 6 wood, 6 sheep, 6 wheat, 5 brick, 5 ore, 2 desert
-    bag=shuffle([...Array(6).fill("wood"),...Array(6).fill("sheep"),...Array(6).fill("wheat"),
-      ...Array(5).fill("brick"),...Array(5).fill("ore"),...Array(2).fill("desert")]);
-    // 28 number tokens: two each of 2 & 12, three each of 3,4,5,6,8,9,10,11
-    nums=shuffle([2,2,12,12,3,3,3,4,4,4,5,5,5,6,6,6,8,8,8,9,9,9,10,10,10,11,11,11]);
-  } else {
-    // standard 19-hex board
-    bag=shuffle([...Array(4).fill("wood"),...Array(3).fill("brick"),...Array(4).fill("sheep"),
-      ...Array(4).fill("wheat"),...Array(3).fill("ore"),"desert"]);
-    nums=shuffle([2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]);
-  }
-  const deserts=[];
-  hexes.forEach((h,i)=>{
-    h.resource=bag[i];
-    if(h.resource==="desert"){h.number=null; deserts.push(i);}
-  });
-  // hex adjacency: two hexes are adjacent when they share an edge
-  const hexAdj=hexes.map(()=>[]);
-  edges.forEach(e=>{ if(e.hexes.length===2){ const[a,b]=e.hexes; hexAdj[a].push(b); hexAdj[b].push(a); } });
-  const numbered=hexes.map((h,i)=>i).filter(i=>hexes[i].resource!=="desert");
-  // red number tokens (6 & 8) may never sit next to another red token
-  const isRed=n=>n===6||n===8;
-  const place=()=>numbered.forEach((hi,k)=>{ hexes[hi].number=nums[k]; });
-  const okay=()=>numbered.every(hi=>!isRed(hexes[hi].number) || hexAdj[hi].every(nb=>!isRed(hexes[nb].number)));
-  place();
-  for(let tries=0; tries<300 && !okay(); tries++){ shuffle(nums); place(); }
-  // robber starts on a desert (one of the two on the large board)
-  return deserts[Math.floor(Math.random()*deserts.length)];
-}
-
-/* Place harbours (ports) on coastal boundary edges, spread around the coast.
-   type "3:1" = generic; a resource name = 2:1 for that resource. */
-function assignHarbours(){
-  harbours=[];
-  // boundary edges = edges touching only one hex; order them around the coast by angle
-  const boundary=edges.filter(e=>e.hexes.length===1).map(e=>{
-    const a=vertices[e.v1], b=vertices[e.v2];
-    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
-    return {e, ang:Math.atan2(my-CY0,mx-CX0)};
-  }).sort((p,q)=>p.ang-q.ang);
-  let types;
-  if(hexes.length===30){
-    // 30-hex board: 5 generic 3:1 and 6 specific 2:1 (wheat repeated)
-    types=["3:1","3:1","3:1","3:1","3:1","wood","brick","sheep","wheat","ore","wheat"];
-  } else {
-    // 19-hex board: 4 generic 3:1 and 5 specific 2:1 (one of each resource)
-    types=["3:1","3:1","3:1","3:1","wood","brick","sheep","wheat","ore"];
-  }
-  shuffle(types);
-  const n=types.length, step=boundary.length/n;
-  for(let i=0;i<n;i++){
-    const e=boundary[Math.floor(i*step)].e;
-    harbours.push({edge:e.id, v1:e.v1, v2:e.v2, type:types[i]});
-  }
-}
-
 /* ---------------- Game state ---------------- */
-let S=null;
+let S=null;                 // the single live game-state instance (from the engine)
+let gameOverShown=false;    // ensures the game-over scoreboard/sound fire only once
 const $=id=>document.getElementById(id);
+
+/* Point the renderer's globals at a game-state object's geometry & player meta. */
+function bindGameState(g){
+  hexes=g.hexes; vertices=g.vertices; edges=g.edges; harbours=g.harbours;
+  PLAYER_NAMES=g.playerNames; PLAYER_COLORS=g.playerColors;
+}
+
+/* ---------------- Thin engine wrappers (bind the current game S) ----------------
+   The rendering / UI code below calls these exactly as before; each just forwards
+   to the engine with the live game-state so call sites stay unchanged. */
+function ownCount(p,type){ return E.ownCount(S,p,type); }
+function totalCards(p){ return E.totalCards(S,p); }
+function canAfford(p,cost){ return E.canAfford(S,p,cost); }
+function costText(cost){ return E.costText(cost); }
+function playerHarbours(p){ return E.playerHarbours(S,p); }
+function harbourLabel(t){ return E.harbourLabel(t); }
+function harbourRate(p,res){ return E.harbourRate(S,p,res); }
+function legalSettlements(p,setup){ return E.legalSettlements(S,p,setup); }
+function legalRoads(p,setup,anchorV){ return E.legalRoads(S,p,setup,anchorV); }
+function legalCities(p){ return E.legalCities(S,p); }
+function canActNow(){ return E.canActNow(S); }
+function canPlayDevNow(){ return E.canPlayDevNow(S); }
+function canPlayRoadBuilding(p){ return E.canPlayRoadBuilding(S,p); }
+function plentyCap(){ return E.plentyCap(S); }
 
 /* ---------------- Pre-game setup screen ---------------- */
 const setupState={count:3, players:[]};
@@ -1077,366 +1006,73 @@ function renderSetup(){
 function startGame(){
   if(!setupValid()) return;
   const seats=setupState.players.slice(0,setupState.count);
-  const n=seats.length;
-  PLAYER_NAMES=seats.map(s=>s.name.trim());
-  PLAYER_COLORS=seats.map(s=>s.color);
-  COUNTS=(n>=5)?COUNTS_LARGE:COUNTS_SMALL;   // larger board for 5-6 players
-  buildGeometry();
-  const robberHex=assignTiles();
-  assignHarbours();
-  S={
-    nPlayers:n,
-    // The bank: 19 cards of each resource. Everything players earn is drawn from here;
-    // everything they pay or discard returns here. Monopoly never touches the bank.
-    bank:{wood:19,brick:19,sheep:19,wheat:19,ore:19},
-    players:Array.from({length:n},(_,i)=>({i,resources:{wood:0,brick:0,sheep:0,wheat:0,ore:0},vp:0,
-      dev:{knight:0,vp:0,road:0,plenty:0,mono:0},      // development cards currently held
-      devNew:{knight:0,vp:0,road:0,plenty:0,mono:0},   // of those, bought this turn (not yet playable)
-      playedKnights:0, roadLen:0,
-      // ---- lifetime per-player stats (all live) ----
-      devBought:0, devPlayed:0,           // dev cards bought / actually played over the game
-      lifetimeRes:0,                      // every resource card ever gained, from any source
-      expProd:0,                          // cumulative expected production (pips/36 summed each roll)
-      robberMoves:0,                      // times this player moved the robber (7 or Knight)
-      cardsStolen:0, cardsStolenFrom:0,   // cards robbed from others / times robbed by others
-      tradesBank:0, tradesHarbour:0, tradesPlayer:0,   // trades made, by kind
-      discardsLost:0})),                  // cards discarded on 7s
-    buildings:{},          // vertexId -> {player,type}
-    roads:{},              // edgeId -> player
-    robberHex,
-    phase:"setup",
-    cur:0,
-    hasRolled:false,
-    mode:null,             // null|settlement|road|city|robber|roadBuild|setupSettlement|setupRoad
-    pendingRobber:false,
-    lastSetupV:null,
-    dice:[null,null],
-    // ---- live statistics ----
-    rollCounts:Array(13).fill(0),     // index = dice total (2..12) -> times rolled
-    production:{wood:0,brick:0,sheep:0,wheat:0,ore:0},                    // total of each resource paid out on rolls
-    playerProduction:Array.from({length:n},()=>({wood:0,brick:0,sheep:0,wheat:0,ore:0})),  // per-player dice gains
-    // development deck (25): 14 Knight, 5 VP, 2 Road Building, 2 Year of Plenty, 2 Monopoly
-    deck:shuffle([...Array(14).fill("knight"),...Array(5).fill("vp"),...Array(2).fill("road"),
-      ...Array(2).fill("plenty"),...Array(2).fill("mono")]),
-    devPlayedThisTurn:false,
-    freeRoadsLeft:0,
-    largestArmy:null,      // player index holding Largest Army (+2 VP)
-    longestRoad:null,      // player index holding Longest Road (+2 VP)
-    log:[]
-  };
-  // snake setup order
-  const fwd=[...Array(n).keys()];
-  S.setupQueue=[...fwd,...[...fwd].reverse()];
-  S.setupIdx=0;
-  S.settlementsPlaced=Array(n).fill(0);
-
+  // Build a fresh, self-contained game in the engine, then point the renderer at it.
+  S=E.createGame({
+    nPlayers:seats.length,
+    names:seats.map(s=>s.name.trim()),
+    colors:seats.map(s=>s.color)
+  });
+  bindGameState(S);
+  gameOverShown=false;
   $("overlay").classList.add("hidden");
   FX.prevRes=null; FX.newBuilding=null; FX.newRoad=null; FX.robberFrom=null; FX.diceRoll=false;
   SFX.unlock();                          // the Start click is a user gesture — wake audio now
   drawStaticBoard();
-  beginSetupTurn();
-}
-
-function pushLog(msg,now){ S.log.push({msg,now}); if(S.log.length>40)S.log.shift(); }
-
-/* ---------------- Counting / rules helpers ---------------- */
-function ownCount(p,type){
-  if(type==="road") return Object.values(S.roads).filter(x=>x===p).length;
-  return Object.values(S.buildings).filter(b=>b.player===p&&b.type===type).length;
-}
-function recomputeVP(){
-  S.players.forEach(pl=>pl.vp=0);
-  for(const vid in S.buildings){const b=S.buildings[vid];S.players[b.player].vp+=(b.type==="city"?2:1);}
-  // Victory Point development cards each add 1 (silently, even the turn they were bought).
-  S.players.forEach(pl=>pl.vp+=pl.dev.vp);
-  // Special-award bonuses.
-  if(S.largestArmy!=null) S.players[S.largestArmy].vp+=2;
-  if(S.longestRoad!=null) S.players[S.longestRoad].vp+=2;
-}
-/* Longest continuous road for player p: the longest trail (no edge reused) along their
-   connected road segments, with the path broken at any vertex holding an opponent's building. */
-function longestRoadLength(p){
-  const myEdges=Object.keys(S.roads).filter(eid=>S.roads[eid]===p).map(Number);
-  if(myEdges.length===0) return 0;
-  const adj={};
-  myEdges.forEach(eid=>{
-    const e=edges[eid];
-    (adj[e.v1]=adj[e.v1]||[]).push({eid,to:e.v2});
-    (adj[e.v2]=adj[e.v2]||[]).push({eid,to:e.v1});
-  });
-  const blocked=v=>{const b=S.buildings[v]; return !!(b&&b.player!==p);}; // opponent building cuts the path
-  let best=0;
-  const dfs=(v,len,used,first)=>{
-    if(len>best) best=len;
-    if(blocked(v)&&!first) return;          // a path can end at an opponent's building, but not pass through
-    for(const {eid,to} of adj[v]){
-      if(used.has(eid)) continue;
-      used.add(eid); dfs(to,len+1,used,false); used.delete(eid);
-    }
-  };
-  Object.keys(adj).map(Number).forEach(start=>dfs(start,0,new Set(),true));
-  return best;
-}
-function updateLongestRoad(){
-  S.players.forEach(pl=>pl.roadLen=longestRoadLength(pl.i));
-  const len=i=>S.players[i].roadLen;
-  const prev=S.longestRoad;
-  let holder=prev;
-  if(holder!=null && len(holder)<5) holder=null;     // current holder's road was cut below 5
-  let maxLen=0, leaders=[];
-  for(let i=0;i<S.nPlayers;i++){const L=len(i); if(L>maxLen){maxLen=L;leaders=[i];} else if(L===maxLen) leaders.push(i);}
-  if(maxLen<5) holder=null;
-  else if(holder==null){ if(leaders.length===1) holder=leaders[0]; }   // first to a unique 5+
-  else if(len(holder)<maxLen){ if(leaders.length===1) holder=leaders[0]; } // strictly longer unique challenger
-  // (a tie, or the holder still being the max, leaves the title where it is)
-  if(holder!==prev){
-    S.longestRoad=holder;
-    if(holder==null) pushLog("Longest Road is no longer held.",true);
-    else if(prev==null) pushLog(PLAYER_NAMES[holder]+" claims the Longest Road (+2 VP).",true);
-    else pushLog(PLAYER_NAMES[holder]+" takes the Longest Road from "+PLAYER_NAMES[prev]+" (+2 VP).",true);
-  }
-}
-function updateLargestArmy(){
-  const p=S.cur, k=S.players[p].playedKnights;     // only the player who just played a Knight can gain it
-  if(k<3) return;
-  const cur=S.largestArmy;
-  if(cur===p) return;
-  if(cur==null){ S.largestArmy=p; pushLog(PLAYER_NAMES[p]+" claims the Largest Army (+2 VP).",true); }
-  else if(k>S.players[cur].playedKnights){ S.largestArmy=p; pushLog(PLAYER_NAMES[p]+" takes the Largest Army from "+PLAYER_NAMES[cur]+" (+2 VP).",true); }
-}
-function totalCards(p){return RES_ORDER.reduce((s,r)=>s+S.players[p].resources[r],0);}
-function canAfford(p,cost){return Object.keys(cost).every(r=>S.players[p].resources[r]>=cost[r]);}
-function pay(p,cost){Object.keys(cost).forEach(r=>{S.players[p].resources[r]-=cost[r]; S.bank[r]+=cost[r];});}
-function costText(cost){return Object.keys(cost).map(r=>cost[r]+" "+RES_SHORT[r].toLowerCase()).join(", ");}
-
-/* Harbours a player can use (settlement or city on one of the harbour's vertices). */
-function playerHarbours(p){
-  return harbours.filter(h=>{
-    const b1=S.buildings[h.v1], b2=S.buildings[h.v2];
-    return (b1&&b1.player===p)||(b2&&b2.player===p);
-  });
-}
-function harbourLabel(t){ return t==="3:1" ? "3:1" : "2:1 "+RES_SHORT[t]; }
-// Best maritime rate for giving resource `res`: 4 (bank), 3 (generic harbour) or 2 (matching 2:1).
-function harbourRate(p,res){
-  let rate=4;
-  playerHarbours(p).forEach(h=>{
-    if(h.type==="3:1") rate=Math.min(rate,3);
-    else if(h.type===res) rate=Math.min(rate,2);
-  });
-  return rate;
-}
-
-function hasOwnRoadAt(vid,p){return vertices[vid].edges.some(eid=>S.roads[eid]===p);}
-function roadConnected(eid,p){
-  const e=edges[eid];
-  for(const v of [e.v1,e.v2]){
-    const b=S.buildings[v];
-    if(b&&b.player===p) return true;
-    if(vertices[v].edges.some(o=>o!==eid&&S.roads[o]===p)) return true;
-  }
-  return false;
-}
-function legalSettlements(p,setup){
-  return vertices.filter(v=>!S.buildings[v.id]
-      && v.adj.every(n=>!S.buildings[n])
-      && (setup || hasOwnRoadAt(v.id,p))).map(v=>v.id);
-}
-function legalRoads(p,setup,anchorV){
-  return edges.filter(e=> S.roads[e.id]===undefined
-      && (setup ? (e.v1===anchorV||e.v2===anchorV) : roadConnected(e.id,p))).map(e=>e.id);
-}
-function legalCities(p){
-  return Object.keys(S.buildings).filter(v=>S.buildings[v].player===p&&S.buildings[v].type==="settlement").map(Number);
-}
-
-/* ---------------- Setup phase ---------------- */
-function beginSetupTurn(){
-  S.cur=S.setupQueue[S.setupIdx];
-  S.mode="setupSettlement"; S.lastSetupV=null;
+  E.beginSetupTurn(S);
   renderAll();
 }
+
+/* ---------------- Setup / build placement (UI wrappers around the engine) ----------------
+   Each click handler delegates the state change & rules to the engine, then applies the
+   matching animation hint + sound and re-renders. */
 function commitSettlement(vid){
-  if(S.phase==="setup"){
-    S.buildings[vid]={player:S.cur,type:"settlement"};
-    S.settlementsPlaced[S.cur]++;
-    if(S.settlementsPlaced[S.cur]===2){ // second settlement yields starting resources
-      const got=[];
-      vertices[vid].hexes.forEach(hi=>{const h=hexes[hi];if(h.resource!=="desert"){S.players[S.cur].resources[h.resource]++;S.bank[h.resource]--;S.players[S.cur].lifetimeRes++;got.push(RES_SHORT[h.resource]);}});
-      if(got.length) pushLog(PLAYER_NAMES[S.cur]+" collects "+got.join(", ")+" from the second settlement.");
-    }
-    S.lastSetupV=vid; S.mode="setupRoad";
-    updateLongestRoad(); recomputeVP();
-    FX.newBuilding=vid; SFX.play("settlement");
-    renderAll();
-    return;
-  }
-  // normal play
-  pay(S.cur,COST.settlement);
-  S.buildings[vid]={player:S.cur,type:"settlement"};
-  pushLog(PLAYER_NAMES[S.cur]+" builds a settlement.",true);
+  const res=E.placeSettlement(S,vid);
+  if(!res||!res.ok) return;
   FX.newBuilding=vid; SFX.play("settlement");
-  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); renderAll();
+  renderAll();
 }
 function commitRoad(eid){
-  if(S.phase==="setup"){
-    S.roads[eid]=S.cur;
-    updateLongestRoad();
-    FX.newRoad=eid; SFX.play("road");
-    S.setupIdx++;
-    if(S.setupIdx<S.setupQueue.length){ beginSetupTurn(); }
-    else { // setup complete
-      S.phase="play"; S.cur=0; S.hasRolled=false; S.mode=null;
-      pushLog("Setup complete — let the trading begin!",true);
-      renderAll();
-    }
-    return;
-  }
-  if(S.mode==="roadBuild"){           // free roads from a Road Building card
-    S.roads[eid]=S.cur; S.freeRoadsLeft--;
-    pushLog(PLAYER_NAMES[S.cur]+" builds a free road.",true);
-    FX.newRoad=eid; SFX.play("road");
-    updateLongestRoad(); recomputeVP(); checkWin();
-    if(S.phase==="over"){ S.mode=null; renderAll(); return; }
-    if(!(S.freeRoadsLeft>0 && ownCount(S.cur,"road")<LIMIT.road && legalRoads(S.cur,false,null).length>0)) S.mode=null;
-    renderAll();
-    return;
-  }
-  pay(S.cur,COST.road);
-  S.roads[eid]=S.cur;
-  pushLog(PLAYER_NAMES[S.cur]+" builds a road.",true);
+  const res=E.placeRoad(S,eid);
+  if(!res||!res.ok) return;
   FX.newRoad=eid; SFX.play("road");
-  S.mode=null; updateLongestRoad(); recomputeVP(); checkWin(); renderAll();
+  renderAll();
 }
 function commitCity(vid){
-  pay(S.cur,COST.city);
-  S.buildings[vid].type="city";
-  pushLog(PLAYER_NAMES[S.cur]+" upgrades to a city.",true);
+  const res=E.upgradeCity(S,vid);
+  if(!res||!res.ok) return;
   FX.newBuilding=vid; SFX.play("city");
-  S.mode=null; recomputeVP(); checkWin(); renderAll();
+  renderAll();
 }
 function commitRobber(hi){
-  FX.robberFrom=S.robberHex;               // remember where it slides from
-  S.robberHex=hi; S.mode=null;
-  S.players[S.cur].robberMoves++;          // live stats: a robber move (from a 7 or a Knight)
-  // Opponents with a settlement or city touching the new hex are eligible to be robbed.
-  const victims=[...new Set(hexes[hi].corners.map(v=>S.buildings[v]).filter(b=>b&&b.player!==S.cur).map(b=>b.player))];
-  if(victims.length<=1){
-    finishRobber(victims[0]);           // undefined → nobody to steal from
-  } else {
-    // More than one rival borders the hex — let the current player pick.
-    S.stealChoices=victims; renderAll(); openSteal();
-  }
+  const res=E.moveRobber(S,hi);
+  FX.robberFrom=res.from;                   // remember where it slides from
+  if(res.needChoice){ renderAll(); openSteal(); }  // several rivals — let the player pick
+  else finishRobber(res.victim);            // undefined → nobody to steal from
 }
 function finishRobber(victim){
-  S.pendingRobber=false; S.mode=null; S.stealChoices=null;
-  let stole=false;
-  if(victim==null){
-    pushLog(PLAYER_NAMES[S.cur]+" moves the robber. No one to steal from here.",true);
-  } else {
-    const pool=[]; RES_ORDER.forEach(r=>{for(let k=0;k<S.players[victim].resources[r];k++)pool.push(r);});
-    if(pool.length===0){
-      pushLog(PLAYER_NAMES[S.cur]+" moves the robber, but "+PLAYER_NAMES[victim]+" has no cards to steal.",true);
-    } else {
-      const r=pool[Math.floor(Math.random()*pool.length)];
-      S.players[victim].resources[r]--; S.players[S.cur].resources[r]++;
-      S.players[S.cur].lifetimeRes++;                  // a stolen card is a card gained
-      S.players[S.cur].cardsStolen++; S.players[victim].cardsStolenFrom++;
-      stole=true;
-      pushLog(PLAYER_NAMES[S.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+PLAYER_NAMES[victim]+".",true);
-    }
-  }
-  SFX.play(stole?"steal":"robber");
+  const res=E.resolveSteal(S,victim);
+  SFX.play(res.stole?"steal":"robber");
   renderAll();
 }
 
 /* ---------------- Turn actions ---------------- */
 function rollDice(){
   if(S.phase!=="play"||S.hasRolled) return;
-  const d1=1+Math.floor(Math.random()*6), d2=1+Math.floor(Math.random()*6);
-  S.dice=[d1,d2]; S.hasRolled=true;
-  const sum=d1+d2;
+  const res=E.rollDice(S);
+  if(!res.ok) return;
   FX.diceRoll=true;
-  S.rollCounts[sum]++;                 // live stats: roll-frequency histogram
-  // live stats: every roll, accrue each player's expected production (their board pips / 36)
-  for(let i=0;i<S.nPlayers;i++) S.players[i].expProd+=expectedPips(i)/36;
-  if(sum===7){
+  if(res.seven){
     SFX.play("roll7");
-    // A 7: first everyone over the hand limit discards, THEN the robber moves.
-    S.pendingRobber=true; S.mode=null;
-    pushLog(PLAYER_NAMES[S.cur]+" rolled a 7.",true);
-    const order=[];
-    for(let k=0;k<S.nPlayers;k++){const pi=(S.cur+k)%S.nPlayers; if(totalCards(pi)>7) order.push(pi);}
-    if(order.length){
-      S.discardQueue=order; S.discardIdx=0;
-      renderAll();
-      advanceDiscards();
-      return;
-    }
-    S.mode="robber";
-    pushLog(PLAYER_NAMES[S.cur]+" — move the robber.",true);
+    if(res.needDiscards){ renderAll(); advanceDiscards(); return; }
   } else {
-    // First tally what every player is owed per resource, without paying yet.
-    const demand={}; // res -> {byP:{player:amount}, total}
-    hexes.forEach((h,hi)=>{
-      if(h.number!==sum||hi===S.robberHex||h.resource==="desert") return;
-      h.corners.forEach(v=>{const b=S.buildings[v];
-        if(b){const amt=b.type==="city"?2:1, r=h.resource;
-          const d=demand[r]||(demand[r]={byP:{},total:0});
-          d.byP[b.player]=(d.byP[b.player]||0)+amt; d.total+=amt;}});
-    });
-    // Pay each resource out of the bank, applying the production-shortage rule per resource.
-    const gains={}, short=[];
-    RES_ORDER.forEach(r=>{
-      const d=demand[r]; if(!d) return;
-      const avail=S.bank[r];
-      const recipients=Object.keys(d.byP).map(Number);
-      if(d.total<=avail){                         // bank can pay everyone in full
-        recipients.forEach(pi=>{const a=d.byP[pi]; S.players[pi].resources[r]+=a; S.bank[r]-=a;
-          gains[pi]=gains[pi]||{}; gains[pi][r]=a;});
-      } else if(recipients.length===1){           // single claimant gets a partial payout
-        const pi=recipients[0], a=Math.min(d.byP[pi],avail);
-        if(a>0){ S.players[pi].resources[r]+=a; S.bank[r]-=a; gains[pi]=gains[pi]||{}; gains[pi][r]=a; }
-        short.push(RES_SHORT[r].toLowerCase()+" (partial)");
-      } else {                                    // several claimants, not enough for all → no one gets any
-        short.push(RES_SHORT[r].toLowerCase());
-      }
-    });
-    // live stats: tally what was actually produced, overall and per player
-    Object.keys(gains).forEach(p=>{ const g=gains[p];
-      Object.keys(g).forEach(r=>{ S.production[r]+=g[r]; S.playerProduction[p][r]+=g[r]; S.players[p].lifetimeRes+=g[r]; }); });
-    const parts=Object.keys(gains).map(p=>PLAYER_NAMES[p]+" +"+Object.keys(gains[p]).map(r=>gains[p][r]+RES_SHORT[r][0]).join(""));
-    let msg="Rolled "+sum+(parts.length?" — "+parts.join(", "):" — no production.");
-    if(short.length) msg+=" — bank short on "+short.join(", ")+".";
-    pushLog(msg,true);
     SFX.play("roll");
-    if(parts.length) SFX.play("collect",280);    // a soft tick after the dice settle, when anyone produced
+    if(res.produced) SFX.play("collect",280);    // a soft tick after the dice settle, when anyone produced
   }
   renderAll();
 }
 function endTurn(){
-  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber||S.mode==="robber"||S.mode==="roadBuild") return;
-  // Cards bought this turn become playable from the next turn onward.
-  S.players[S.cur].devNew={knight:0,vp:0,road:0,plenty:0,mono:0};
-  S.cur=(S.cur+1)%S.nPlayers; S.hasRolled=false; S.mode=null; S.dice=[null,null];
-  S.devPlayedThisTurn=false;
-  renderAll();
+  if(E.endTurn(S)) renderAll();
 }
-function checkWin(){
-  if(S.phase==="over") return;
-  if(S.players[S.cur].vp>=10){
-    S.phase="over"; S.winner=S.cur; S.mode=null;
-    const vpc=S.players[S.cur].dev.vp;
-    pushLog(PLAYER_NAMES[S.cur]+" reaches "+S.players[S.cur].vp+" VP and wins!"+
-      (vpc?` Reveals ${vpc} Victory Point card${vpc>1?"s":""}.`:""),true);
-    SFX.play("win");
-    showGameOverScoreboard();
-  }
-}
-// True when the current player may take a turn action (buy/build/trade) — these need the roll done first.
-function canActNow(){ return S.phase==="play"&&S.hasRolled&&!S.pendingRobber&&S.mode!=="robber"&&S.mode!=="roadBuild"; }
-// True when the current player may play a development card — allowed before OR after the roll.
-function canPlayDevNow(){ return S.phase==="play"&&!S.pendingRobber&&S.mode!=="robber"&&S.mode!=="roadBuild"; }
 
 /* ---------------- Mode entry from buttons ---------------- */
 function tryMode(type){
@@ -2097,6 +1733,13 @@ function renderAll(){
   renderPieces(); renderInteract();
   renderDice(); renderBank(); renderPlayers(); renderPrompt(); renderActions(); renderLog();
   renderStats();
+  // The engine sets phase "over" when someone wins; present that once, here, so it
+  // fires no matter which action triggered the win.
+  if(S && S.phase==="over" && !gameOverShown){
+    gameOverShown=true;
+    SFX.play("win");
+    showGameOverScoreboard();
+  }
 }
 
 /* ================= TRADING ================= */
@@ -2110,7 +1753,7 @@ function openTrade(){
   $("tradeOverlay").classList.remove("hidden");
   renderTrade(); renderAll();
 }
-function closeTrade(){ TRADE=null; $("tradeOverlay").classList.add("hidden"); checkWin(); renderAll(); }
+function closeTrade(){ TRADE=null; $("tradeOverlay").classList.add("hidden"); renderAll(); }
 
 function tradeGoto(screen){
   if(screen==="bank"||screen==="harbour") TRADE={screen, give:null, receive:null};
@@ -2185,17 +1828,11 @@ function maritimeHTML(harbour){
     </div>`;
 }
 function doMaritimeTrade(harbour){
-  const p=S.cur, g=TRADE.give, rc=TRADE.receive;
-  if(!g||!rc||g===rc) return;
-  const rate=harbour?harbourRate(p,g):4;
-  if(S.players[p].resources[g]<rate) return;
-  if(S.bank[rc]<1){ flash("The bank is out of "+RES_SHORT[rc].toLowerCase()+" — pick another resource."); return; }
-  S.players[p].resources[g]-=rate; S.bank[g]+=rate;
-  S.players[p].resources[rc]+=1; S.bank[rc]-=1;
-  S.players[p].lifetimeRes+=1;
-  if(harbour) S.players[p].tradesHarbour++; else S.players[p].tradesBank++;
-  pushLog(PLAYER_NAMES[p]+" trades "+rate+" "+RES_SHORT[g].toLowerCase()+" for 1 "+RES_SHORT[rc].toLowerCase()+
-    (harbour?" at a harbour ("+rate+":1).":" with the bank (4:1)."),true);
+  const res=E.maritimeTrade(S, TRADE.give, TRADE.receive, harbour);
+  if(!res.ok){
+    if(res.reason==="bankout") flash("The bank is out of "+RES_SHORT[TRADE.receive].toLowerCase()+" — pick another resource.");
+    return;
+  }
   SFX.play("trade");
   closeTrade();
 }
@@ -2274,27 +1911,15 @@ function playerRespondHTML(){
 }
 function tradeRespond(accept){
   const p=S.cur, q=TRADE.partner;
-  if(!accept){ pushLog(PLAYER_NAMES[q]+" declines "+PLAYER_NAMES[p]+"'s offer."); closeTrade(); return; }
-  const giveOk=RES_ORDER.every(r=>S.players[p].resources[r]>=TRADE.give[r]);
-  const recvOk=RES_ORDER.every(r=>S.players[q].resources[r]>=TRADE.receive[r]);
-  if(!giveOk||!recvOk){ pushLog("Trade failed — the resources are no longer available.",true); closeTrade(); return; }
-  RES_ORDER.forEach(r=>{
-    S.players[p].resources[r]-=TRADE.give[r]; S.players[q].resources[r]+=TRADE.give[r];
-    S.players[q].resources[r]-=TRADE.receive[r]; S.players[p].resources[r]+=TRADE.receive[r];
-  });
-  // both sides gain the cards they received; both record a player-to-player trade
-  S.players[p].lifetimeRes+=RES_ORDER.reduce((s,r)=>s+TRADE.receive[r],0);
-  S.players[q].lifetimeRes+=RES_ORDER.reduce((s,r)=>s+TRADE.give[r],0);
-  S.players[p].tradesPlayer++; S.players[q].tradesPlayer++;
-  pushLog(PLAYER_NAMES[p]+" and "+PLAYER_NAMES[q]+" trade — "+PLAYER_NAMES[p]+" gives "+resList(TRADE.give)+", gets "+resList(TRADE.receive)+".",true);
-  SFX.play("trade");
+  if(!accept){ E.pushLog(S, PLAYER_NAMES[q]+" declines "+PLAYER_NAMES[p]+"'s offer."); closeTrade(); return; }
+  const res=E.playerTrade(S, p, q, TRADE.give, TRADE.receive);
+  if(res.ok) SFX.play("trade");
   closeTrade();
 }
 
 /* ================= ROBBER: DISCARD & STEAL DIALOGS ================= */
 let DISCARD=null;
-function openDiscard(){
-  const p=S.discardQueue[S.discardIdx];
+function openDiscard(p){
   DISCARD={player:p, need:Math.floor(totalCards(p)/2), sel:zeroRes()};
   $("discardOverlay").classList.remove("hidden");
   renderDiscard();
@@ -2332,28 +1957,17 @@ function discardAdjust(r,delta){
   renderDiscard();
 }
 function confirmDiscard(){
-  const p=DISCARD.player;
-  const selSum=RES_ORDER.reduce((s,r)=>s+DISCARD.sel[r],0);
-  if(selSum!==DISCARD.need) return;
-  RES_ORDER.forEach(r=>{ S.players[p].resources[r]-=DISCARD.sel[r]; S.bank[r]+=DISCARD.sel[r]; });
-  S.players[p].discardsLost+=DISCARD.need;
-  pushLog(PLAYER_NAMES[p]+" discards "+DISCARD.need+" card"+(DISCARD.need===1?"":"s")+".",true);
-  DISCARD=null; S.discardIdx++;
+  const res=E.applyDiscard(S, DISCARD.player, DISCARD.sel);
+  if(!res.ok) return;
+  DISCARD=null;
   advanceDiscards();
 }
 /* Walk the discard queue: each player over the limit gets the discard dialog.
-   When everyone is done, the robber moves. */
+   The engine advances the queue and, when everyone is done, hands over to the robber. */
 function advanceDiscards(){
-  while(S.discardQueue && S.discardIdx<S.discardQueue.length){
-    const p=S.discardQueue[S.discardIdx];
-    if(totalCards(p)<=7){ S.discardIdx++; continue; }
-    openDiscard(); return;                     // wait for confirmDiscard()
-  }
-  S.discardQueue=null; S.discardIdx=0;
-  DISCARD=null; $("discardOverlay").classList.add("hidden");
-  S.mode="robber";
-  pushLog(PLAYER_NAMES[S.cur]+" — move the robber.",true);
-  renderAll();
+  const p=E.nextDiscarder(S);
+  if(p==null){ DISCARD=null; $("discardOverlay").classList.add("hidden"); renderAll(); return; }
+  openDiscard(p);                              // wait for confirmDiscard()
 }
 
 function openSteal(){ $("stealOverlay").classList.remove("hidden"); renderSteal(); }
@@ -2373,16 +1987,14 @@ function chooseSteal(v){ $("stealOverlay").classList.add("hidden"); finishRobber
 
 /* ================= DEVELOPMENT CARDS ================= */
 function buyDev(){
-  if(!canActNow()) return;
-  const p=S.cur;
-  if(S.deck.length===0){ flash("The development deck is empty."); return; }
-  if(!canAfford(p,COST.dev)){ flash("Not enough resources — a development card costs "+costText(COST.dev)+"."); return; }
-  pay(p,COST.dev);
-  const card=S.deck.shift();                 // drawn from the top, hidden from opponents
-  S.players[p].dev[card]++; S.players[p].devNew[card]++; S.players[p].devBought++;
-  pushLog(PLAYER_NAMES[p]+" buys a development card.",true);
+  const res=E.buyDev(S);
+  if(!res.ok){
+    if(res.reason==="empty") flash("The development deck is empty.");
+    else if(res.reason==="afford") flash("Not enough resources — a development card costs "+costText(COST.dev)+".");
+    return;
+  }
   SFX.play("dev");
-  recomputeVP(); checkWin(); renderAll();     // a bought VP card can win immediately
+  renderAll();                                // a bought VP card can win immediately (handled in renderAll)
 }
 
 let DEV=null;
@@ -2395,7 +2007,6 @@ function renderDev(){
   else if(DEV.screen==="plenty") m.innerHTML=devPlentyHTML();
   else if(DEV.screen==="mono") m.innerHTML=devMonoHTML();
 }
-function canPlayRoadBuilding(p){ return ownCount(p,"road")<LIMIT.road && legalRoads(p,false,null).length>0; }
 function devListHTML(){
   const p=S.cur, d=S.players[p].dev, nw=S.players[p].devNew;
   const playable=t=>d[t]-nw[t];
@@ -2425,24 +2036,16 @@ function devListHTML(){
     <div class="trade-foot"><button class="btn cancel" onclick="closeDev()">Close</button></div>`;
 }
 function devPlayKnight(){
-  if(S.players[S.cur].dev.knight-S.players[S.cur].devNew.knight<=0||S.devPlayedThisTurn) return;
-  const p=S.cur;
-  S.players[p].dev.knight--; S.players[p].playedKnights++; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
+  const res=E.playKnight(S);
+  if(!res.ok) return;
   DEV=null; $("devOverlay").classList.add("hidden");
-  updateLargestArmy(); recomputeVP(); checkWin();
-  if(S.phase==="over"){ renderAll(); return; }
-  S.mode="robber";                              // robber move with no discard step
-  pushLog(PLAYER_NAMES[p]+" plays a Knight.",true);
-  SFX.play("dev");
+  if(!res.over) SFX.play("dev");                // on a win, renderAll plays the win cue instead
   renderAll();
 }
 function devPlayRoad(){
-  const p=S.cur;
-  if(S.players[p].dev.road-S.players[p].devNew.road<=0||S.devPlayedThisTurn||!canPlayRoadBuilding(p)) return;
-  S.players[p].dev.road--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
-  S.freeRoadsLeft=2; S.mode="roadBuild";
+  const res=E.playRoadBuilding(S);
+  if(!res.ok) return;
   DEV=null; $("devOverlay").classList.add("hidden");
-  pushLog(PLAYER_NAMES[p]+" plays Road Building — place 2 free roads.",true);
   SFX.play("dev");
   renderAll();
 }
@@ -2454,7 +2057,6 @@ function devPlayMonoStart(){
   if(S.players[S.cur].dev.mono-S.players[S.cur].devNew.mono<=0||S.devPlayedThisTurn) return;
   DEV={screen:"mono",pick:null}; renderDev();
 }
-function plentyCap(){ return Math.min(2, RES_ORDER.reduce((s,r)=>s+S.bank[r],0)); }
 function devStepperRow(adjFn){
   const cap=plentyCap();
   return `<div class="steppers">`+RES_ORDER.map(r=>{
@@ -2488,16 +2090,11 @@ function devPlentyAdjust(r,delta){
   renderDev();
 }
 function confirmPlenty(){
-  const p=S.cur, sum=RES_ORDER.reduce((s,r)=>s+DEV.sel[r],0), cap=plentyCap();
-  if(sum!==cap||cap===0) return;
-  if(RES_ORDER.some(r=>DEV.sel[r]>S.bank[r])) return;          // never draw more than the bank holds
-  RES_ORDER.forEach(r=>{S.players[p].resources[r]+=DEV.sel[r]; S.bank[r]-=DEV.sel[r];});
-  S.players[p].lifetimeRes+=sum;
-  S.players[p].dev.plenty--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
-  pushLog(PLAYER_NAMES[p]+" plays Year of Plenty and takes "+resList(DEV.sel)+".",true);
+  const res=E.playYearOfPlenty(S, DEV.sel);
+  if(!res.ok) return;
   SFX.play("dev");
   DEV=null; $("devOverlay").classList.add("hidden");
-  recomputeVP(); renderAll();
+  renderAll();
 }
 function devMonoHTML(){
   const cells=RES_ORDER.map(r=>resCellHTML(r,DEV.pick===r,false,"",`devMonoPick('${r}')`)).join("");
@@ -2512,30 +2109,11 @@ function devMonoHTML(){
 }
 function devMonoPick(r){ DEV.pick=r; renderDev(); }
 function confirmMono(){
-  const p=S.cur, r=DEV.pick;
-  if(!r) return;
-  let total=0;
-  for(let i=0;i<S.nPlayers;i++){ if(i===p) continue; total+=S.players[i].resources[r]; S.players[i].resources[r]=0; }
-  S.players[p].resources[r]+=total;
-  S.players[p].lifetimeRes+=total;
-  S.players[p].dev.mono--; S.players[p].devPlayed++; S.devPlayedThisTurn=true;
-  pushLog(PLAYER_NAMES[p]+" plays Monopoly on "+RES_SHORT[r].toLowerCase()+" — collects "+total+" card"+(total===1?"":"s")+".",true);
+  const res=E.playMonopoly(S, DEV.pick);
+  if(!res.ok) return;
   SFX.play("dev");
   DEV=null; $("devOverlay").classList.add("hidden");
-  recomputeVP(); renderAll();
-}
-
-/* ================= EXPECTED PRODUCTION (live statistics) ================= */
-function pips(n){ return (n==null)?0:6-Math.abs(7-n); }
-/* Sum of pips for every number a player's settlements/cities sit on (city counts double).
-   Divided by 36 this is their expected resource yield per roll. */
-function expectedPips(p){
-  let sum=0;
-  for(const vid in S.buildings){ const b=S.buildings[vid]; if(b.player!==p) continue;
-    const mult=(b.type==="city")?2:1;
-    vertices[vid].hexes.forEach(hi=>{ sum+=pips(hexes[hi].number)*mult; });
-  }
-  return sum;
+  renderAll();
 }
 
 /* ================= GAME-OVER SCOREBOARD ================= */
@@ -2655,11 +2233,13 @@ volSlider.addEventListener("input",()=>{ SFX.setVolume((+volSlider.value)/100); 
 refreshSoundUI();
 // Browsers gate audio behind a user gesture — wake the context on the first interaction.
 ["pointerdown","keydown","touchstart"].forEach(ev=>document.addEventListener(ev,()=>SFX.unlock(),{once:true}));
-buildGeometry();
-// draw an idle board behind the start overlay
-assignTiles();
-assignHarbours();
-drawStaticBoard();
+// Draw an idle, randomised board behind the start overlay. We create a throwaway game
+// purely for its geometry; S stays null until the player actually starts a game.
+(function showIdleBoard(){
+  const idle=E.createGame({nPlayers:3, names:PALETTE.slice(0,3).map(c=>c.name), colors:PALETTE.slice(0,3).map(c=>c.hex)});
+  bindGameState(idle);
+  drawStaticBoard();
+})();
 renderSetup();
 </script>
 
