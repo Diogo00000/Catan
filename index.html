@@ -549,13 +549,13 @@
   <div class="modal" id="modal">
     <h1>CATAN</h1>
     <div class="sub">Settlers of the Island</div>
-    <p>Collect wood, brick, sheep, wheat and ore. Build settlements and roads, upgrade to cities, buy development cards and race to <strong>10 victory points</strong>.</p>
+    <p>Share this page's link (it carries the room code) so others can join. When everyone's here, anyone can start — you'll share <strong>one</strong> board and take turns.</p>
     <div class="setup" id="setup">
       <div class="setup-row">
-        <span class="setup-lab">Players</span>
-        <div class="count-btns" id="countBtns"></div>
+        <span class="setup-lab">Your name</span>
+        <input type="text" id="nameInput" class="seat-name" maxlength="14" placeholder="Your name" aria-label="Your name">
       </div>
-      <div class="seats" id="seats"></div>
+      <div class="lobby-list" id="lobbyPlayers"></div>
       <div class="start-row">
         <span class="start-warn" id="startWarn" role="alert"></span>
         <button class="btn primary span2" id="startBtn" onclick="startGame()">Start game</button>
@@ -885,9 +885,28 @@ const SFX=(function(){
 let hexes=[], vertices=[], edges=[], harbours=[];
 
 /* ---------------- Game state ---------------- */
-let S=null;                 // the single live game-state instance (from the engine)
+// The server is the single source of truth. S holds the latest full state
+// RECEIVED from the server; the client renders from it and never mutates the
+// shared game — every change is SENT as an action and applied server-side.
+let S=null;                 // latest game-state received from the server
 let gameOverShown=false;    // ensures the game-over scoreboard/sound fire only once
+let me=null;                // this client's own seat (player index), dealt by the server
+let socket=null;            // the socket.io connection (assigned by the net layer below)
+let roomCode="";            // this page's room code (assigned by the net layer below)
+let myName="Player";        // the name this client joins with
+let gameRunning=false;      // whether a server game is in progress for this room
+let lastRoster=[];          // latest connected-players list (for the lobby)
+let uiMode=null;            // LOCAL build-placement selection: settlement|road|city
 const $=id=>document.getElementById(id);
+
+// Is it this client's turn to take normal turn actions?
+function myTurn(){ return !!(S && me!=null && S.cur===me); }
+// Send an action to the server. The server validates and broadcasts new state.
+function sendAction(type,params){
+  if(!socket){ return; }
+  socket.emit('action', Object.assign({type}, params||{}));
+}
+function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 /* Point the renderer's globals at a game-state object's geometry & player meta. */
 function bindGameState(g){
@@ -913,171 +932,121 @@ function canPlayDevNow(){ return E.canPlayDevNow(S); }
 function canPlayRoadBuilding(p){ return E.canPlayRoadBuilding(S,p); }
 function plentyCap(){ return E.plentyCap(S); }
 
-/* ---------------- Pre-game setup screen ---------------- */
-const setupState={count:3, players:[]};
-function firstFreeColor(taken){ return (PALETTE.find(c=>!taken.includes(c.hex))||PALETTE[0]).hex; }
-function defaultSeat(taken,i){ return {name:"Player "+(i+1), color:firstFreeColor(taken), type:"human"}; }
-function ensureSeats(){
-  const ps=setupState.players;
-  while(ps.length<setupState.count) ps.push(defaultSeat(ps.map(p=>p.color),ps.length));
-  ps.length=setupState.count;
+/* ---------------- Online lobby ---------------- */
+// Join (or re-join, e.g. after a name change) the room with the current name.
+function emitJoin(){
+  if(socket && roomCode){ socket.emit('join', {room:roomCode, name:myName||'Player'}); }
 }
-function setupValid(){
-  const ps=setupState.players.slice(0,setupState.count);
-  if(ps.length<3||ps.length>6) return false;
-  if(!ps.every(p=>p.name.trim().length>0)) return false;
-  // names must be distinct (case-insensitive, surrounding spaces ignored)
-  const names=ps.map(p=>p.name.trim().toLowerCase());
-  if(new Set(names).size!==names.length) return false;
-  const cols=ps.map(p=>p.color);
-  return cols.every(Boolean) && new Set(cols).size===cols.length;
-}
-function startWarning(){
-  const ps=setupState.players.slice(0,setupState.count);
-  if(!ps.every(p=>p.name.trim().length>0)) return "Every player needs a name.";
-  const names=ps.map(p=>p.name.trim().toLowerCase());
-  if(new Set(names).size!==names.length) return "Player names must be unique.";
-  return "";
-}
-function refreshStartBtn(){
-  const valid=setupValid();
-  const b=$("startBtn"); if(b) b.disabled=!valid;
-  const w=$("startWarn"); if(w) w.textContent=valid?"":startWarning();
-}
-function renderSetup(){
-  ensureSeats();
-  // player-count buttons
-  const cb=$("countBtns"); cb.innerHTML="";
-  [3,4,5,6].forEach(n=>{
-    const b=document.createElement("button");
-    b.className="count-btn"+(setupState.count===n?" sel":""); b.textContent=n;
-    b.addEventListener("click",()=>{ setupState.count=n; renderSetup(); });
-    cb.appendChild(b);
-  });
-  // one row per seat: name input + colour swatches
-  const seats=$("seats"); seats.innerHTML="";
-  const taken=setupState.players.slice(0,setupState.count).map(p=>p.color);
-  setupState.players.slice(0,setupState.count).forEach((seat,i)=>{
-    const row=document.createElement("div"); row.className="seat";
-    const num=document.createElement("span"); num.className="seat-num"; num.textContent=(i+1);
-    const inp=document.createElement("input");
-    inp.className="seat-name"+(seat.name.trim()?"":" invalid");
-    inp.type="text"; inp.maxLength=14; inp.value=seat.name; inp.placeholder="Name";
-    inp.setAttribute("aria-label","Player "+(i+1)+" name");
-    inp.addEventListener("input",()=>{
-      seat.name=inp.value;
-      inp.classList.toggle("invalid",!inp.value.trim());
-      refreshStartBtn();
-    });
-    const sws=document.createElement("div"); sws.className="swatches";
-    PALETTE.forEach(c=>{
-      const sw=document.createElement("button");
-      sw.className="sw"+(seat.color===c.hex?" sel":"");
-      sw.style.background=c.hex; sw.title=c.name;
-      sw.setAttribute("aria-label",c.name);
-      // disable colours already taken by another seat
-      sw.disabled = (seat.color!==c.hex && taken.includes(c.hex));
-      sw.addEventListener("click",()=>{ seat.color=c.hex; renderSetup(); });
-      sws.appendChild(sw);
-    });
-    row.appendChild(num); row.appendChild(inp); row.appendChild(sws);
-    seats.appendChild(row);
-  });
-  // reserve the height of a full 6-player roster: fill the remaining slots with
-  // invisible placeholder rows so the window keeps a fixed size at any count
-  for(let i=setupState.count;i<6;i++){
-    const row=document.createElement("div"); row.className="seat placeholder";
-    row.setAttribute("aria-hidden","true");
-    const num=document.createElement("span"); num.className="seat-num"; num.textContent=(i+1);
-    const inp=document.createElement("input");
-    inp.className="seat-name"; inp.type="text"; inp.tabIndex=-1; inp.disabled=true;
-    const sws=document.createElement("div"); sws.className="swatches";
-    PALETTE.forEach(c=>{
-      const sw=document.createElement("button");
-      sw.className="sw"; sw.style.background=c.hex; sw.tabIndex=-1; sw.disabled=true;
-      sws.appendChild(sw);
-    });
-    row.appendChild(num); row.appendChild(inp); row.appendChild(sws);
-    seats.appendChild(row);
-  }
-  refreshStartBtn();
-}
-
+// The Start button: ask the server to create the shared game. The server sizes
+// it to the connected players, deals seats and broadcasts the initial state.
 function startGame(){
-  if(!setupValid()) return;
-  const seats=setupState.players.slice(0,setupState.count);
-  // Build a fresh, self-contained game in the engine, then point the renderer at it.
-  S=E.createGame({
-    nPlayers:seats.length,
-    names:seats.map(s=>s.name.trim()),
-    colors:seats.map(s=>s.color)
-  });
-  bindGameState(S);
-  gameOverShown=false;
-  $("overlay").classList.add("hidden");
-  FX.prevRes=null; FX.newBuilding=null; FX.newRoad=null; FX.robberFrom=null; FX.diceRoll=false;
-  SFX.unlock();                          // the Start click is a user gesture — wake audio now
-  drawStaticBoard();
-  E.beginSetupTurn(S);
-  renderAll();
+  SFX.unlock();                          // the Start click is a user gesture — wake audio
+  if(socket) socket.emit('startGame');
+}
+// Render the lobby (connected players + Start button) inside the start overlay.
+function renderLobby(members){
+  if(Array.isArray(members)) lastRoster=members;
+  const list=lastRoster||[];
+  const box=$("lobbyPlayers");
+  if(box){
+    box.innerHTML = list.length
+      ? list.map((m,i)=>`<div class="seat"><span class="seat-num">${i+1}</span>`+
+          `<span class="seat-name" style="display:flex;align-items:center">${escapeHtml(m.name||'Player')}`+
+          `${m.id===(socket&&socket.id)?' <em style="opacity:.6;font-style:normal;margin-left:6px">(you)</em>':''}</span></div>`).join("")
+      : `<div class="seat placeholder"><span class="seat-name" style="opacity:.6">Waiting for players to join…</span></div>`;
+  }
+  const enough=list.length>=2;
+  const b=$("startBtn"); if(b) b.disabled=!enough||!socket;
+  const w=$("startWarn"); if(w) w.textContent=enough?"":"Need at least 2 players in the room to start.";
+}
+// Return to the lobby (e.g. after a game ends or via "New game").
+function backToLobby(){
+  gameRunning=false;
+  ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
+  TRADE=DISCARD=DEV=null;
+  $("overlay").classList.remove("hidden");
+  renderLobby();
 }
 
-/* ---------------- Setup / build placement (UI wrappers around the engine) ----------------
-   Each click handler delegates the state change & rules to the engine, then applies the
-   matching animation hint + sound and re-renders. */
-function commitSettlement(vid){
-  const res=E.placeSettlement(S,vid);
-  if(!res||!res.ok) return;
-  FX.newBuilding=vid; SFX.play("settlement");
+/* ---------------- Receiving state from the server ----------------
+   The server is authoritative: it sends the full game state after every change.
+   We replace S, redraw on a fresh board, derive animations/sounds from the diff,
+   open/close the turn dialogs reactively, then render. */
+function setSeat(idx){ me=idx; if(S) renderAll(); }
+function applyServerState(state){
+  const prev=S;
+  uiMode=null;                           // any local build selection is now stale
+  S=state;
+  bindGameState(S);
+  const fresh = !prev || prev.gameId!==S.gameId;
+  if(fresh){
+    gameOverShown=false;
+    FX.prevRes=null; FX.newBuilding=null; FX.newRoad=null; FX.robberFrom=null; FX.diceRoll=false;
+    // Clear any leftover dialogs from a previous game before drawing the new board.
+    TRADE=DISCARD=DEV=null;
+    ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
+    drawStaticBoard();                   // board geometry is the server's — draw it
+  }
+  diffFX(fresh?null:prev, S);            // animation hints + sounds from what changed
+  gameRunning=true;
+  $("overlay").classList.add("hidden");
   renderAll();
+  syncDialogs();
 }
-function commitRoad(eid){
-  const res=E.placeRoad(S,eid);
-  if(!res||!res.ok) return;
-  FX.newRoad=eid; SFX.play("road");
-  renderAll();
+// Derive animation hints (FX.*) and play sounds from the difference between the
+// previous and the new state, so every client sees/hears the same thing.
+function diffFX(prev,next){
+  if(!prev) return;
+  if(next.dice[0]&&next.dice[1]&&(prev.dice[0]!==next.dice[0]||prev.dice[1]!==next.dice[1])){
+    FX.diceRoll=true;
+    SFX.play(next.dice[0]+next.dice[1]===7?"roll7":"roll");
+  }
+  for(const vid in next.buildings){
+    const nb=next.buildings[vid], ob=prev.buildings[vid];
+    if(!ob){ FX.newBuilding=+vid; SFX.play(nb.type==="city"?"city":"settlement"); }
+    else if(ob.type!=="city"&&nb.type==="city"){ FX.newBuilding=+vid; SFX.play("city"); }
+  }
+  for(const eid in next.roads){
+    if(prev.roads[eid]===undefined){ FX.newRoad=+eid; SFX.play("road"); }
+  }
+  if(prev.robberHex!==next.robberHex){ FX.robberFrom=prev.robberHex; SFX.play("robber"); }
 }
-function commitCity(vid){
-  const res=E.upgradeCity(S,vid);
-  if(!res||!res.ok) return;
-  FX.newBuilding=vid; SFX.play("city");
-  renderAll();
+// Open / close the turn dialogs to match the current state and my seat.
+function syncDialogs(){
+  // Discard-after-a-7: open for me whenever I still owe a discard.
+  const owe = me!=null && S.discardQueue && S.discardQueue.slice(S.discardIdx).includes(me) && totalCards(me)>7;
+  if(owe){ if(!DISCARD||DISCARD.player!==me) openDiscard(me); }
+  else if(DISCARD){ DISCARD=null; $("discardOverlay").classList.add("hidden"); }
+  // Steal target: open for me when I must choose whom to rob.
+  const choose = me!=null && S.cur===me && Array.isArray(S.stealChoices) && S.stealChoices.length>0;
+  if(choose){ if($("stealOverlay").classList.contains("hidden")) openSteal(); }
+  else $("stealOverlay").classList.add("hidden");
+  // Trade / dev dialogs belong to the active player only.
+  if(!myTurn()){
+    if(TRADE){ TRADE=null; $("tradeOverlay").classList.add("hidden"); }
+    if(DEV){ DEV=null; $("devOverlay").classList.add("hidden"); }
+  }
 }
-function commitRobber(hi){
-  const res=E.moveRobber(S,hi);
-  FX.robberFrom=res.from;                   // remember where it slides from
-  if(res.needChoice){ renderAll(); openSteal(); }  // several rivals — let the player pick
-  else finishRobber(res.victim);            // undefined → nobody to steal from
-}
-function finishRobber(victim){
-  const res=E.resolveSteal(S,victim);
-  SFX.play(res.stole?"steal":"robber");
-  renderAll();
-}
+
+/* ---------------- Build placement (send actions to the server) ----------------
+   Each click handler sends an action; the server validates & applies it, then
+   broadcasts the new state which re-renders the board (with animations/sounds). */
+function commitSettlement(vid){ uiMode=null; sendAction("placeSettlement",{vid}); }
+function commitRoad(eid){ uiMode=null; sendAction("placeRoad",{eid}); }
+function commitCity(vid){ uiMode=null; sendAction("upgradeCity",{vid}); }
+function commitRobber(hi){ sendAction("moveRobber",{hi}); }
+function finishRobber(victim){ sendAction("resolveSteal",{victim}); }
 
 /* ---------------- Turn actions ---------------- */
-function rollDice(){
-  if(S.phase!=="play"||S.hasRolled) return;
-  const res=E.rollDice(S);
-  if(!res.ok) return;
-  FX.diceRoll=true;
-  if(res.seven){
-    SFX.play("roll7");
-    if(res.needDiscards){ renderAll(); advanceDiscards(); return; }
-  } else {
-    SFX.play("roll");
-    if(res.produced) SFX.play("collect",280);    // a soft tick after the dice settle, when anyone produced
-  }
-  renderAll();
-}
-function endTurn(){
-  if(E.endTurn(S)) renderAll();
-}
+function rollDice(){ if(!myTurn()) return; sendAction("rollDice"); }
+function endTurn(){ if(!myTurn()) return; uiMode=null; sendAction("endTurn"); }
 
-/* ---------------- Mode entry from buttons ---------------- */
+/* ---------------- Mode entry from buttons ----------------
+   Build "mode" is a LOCAL selection (which placement is being chosen); only when
+   a spot is clicked does an action go to the server. */
 function tryMode(type){
-  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber){return;}
-  if(S.mode===type){ S.mode=null; renderAll(); return; } // toggle off
+  if(!myTurn()||S.phase!=="play"||!S.hasRolled||S.pendingRobber){return;}
+  if(uiMode===type){ uiMode=null; renderAll(); return; } // toggle off
   const p=S.cur;
   if(!canAfford(p,COST[type])){ flash("Not enough resources — a "+type+" costs "+costText(COST[type])+"."); return; }
   let legal;
@@ -1085,10 +1054,10 @@ function tryMode(type){
   else if(type==="road"){ if(ownCount(p,"road")>=LIMIT.road){flash("You've placed all 15 roads.");return;} legal=legalRoads(p,false,null); }
   else if(type==="city"){ if(ownCount(p,"city")>=LIMIT.city){flash("You've built all 4 cities.");return;} legal=legalCities(p); }
   if(legal.length===0){ flash(type==="city"?"No settlement of yours to upgrade.":"No legal spot for a "+type+" right now."); return; }
-  S.mode=type; renderAll();
+  uiMode=type; renderAll();
 }
 function flash(msg){ const pr=$("prompt"); pr.textContent=msg; pr.style.borderColor="#9c3b30"; setTimeout(()=>{pr.style.borderColor="";renderPrompt();},1900); }
-function cancelMode(){ S.mode=null; renderAll(); }
+function cancelMode(){ uiMode=null; renderAll(); }
 
 /* ================= RENDERING ================= */
 const layers={};
@@ -1430,29 +1399,30 @@ function renderPieces(){
 }
 function renderInteract(){
   layers.interact.innerHTML="";
-  const p=S.cur, m=S.mode;
-  if(m==="setupSettlement"||m==="settlement"){
-    legalSettlements(p,m==="setupSettlement").forEach(vid=>{
+  if(!S||!myTurn()) return;     // only the active player gets interactive candidates
+  const p=S.cur, sm=S.mode;     // sm: engine/server mode; uiMode: local build selection
+  if(sm==="setupSettlement"||uiMode==="settlement"){
+    legalSettlements(p,sm==="setupSettlement").forEach(vid=>{
       const v=vertices[vid];
       const c=el("circle",{cx:v.x,cy:v.y,r:11,class:"cand-dot pulse"},layers.interact);
       const hit=el("circle",{cx:v.x,cy:v.y,r:14,fill:"transparent",class:"cand"},layers.interact);
       hit.addEventListener("click",()=>commitSettlement(vid));
     });
-  } else if(m==="setupRoad"||m==="road"||m==="roadBuild"){
-    legalRoads(p,m==="setupRoad",S.lastSetupV).forEach(eid=>{
+  } else if(sm==="setupRoad"||uiMode==="road"||sm==="roadBuild"){
+    legalRoads(p,sm==="setupRoad",S.lastSetupV).forEach(eid=>{
       const e=edges[eid],a=vertices[e.v1],b=vertices[e.v2];
       el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,class:"cand-road pulse"},layers.interact);
       const hit=el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:"transparent",["stroke-width"]:16,class:"cand"},layers.interact);
       hit.addEventListener("click",()=>commitRoad(eid));
     });
-  } else if(m==="city"){
+  } else if(uiMode==="city"){
     legalCities(p).forEach(vid=>{
       const v=vertices[vid];
       el("circle",{cx:v.x,cy:v.y,r:14,class:"cand-ring pulse"},layers.interact);
       const hit=el("circle",{cx:v.x,cy:v.y,r:15,fill:"transparent",class:"cand"},layers.interact);
       hit.addEventListener("click",()=>commitCity(vid));
     });
-  } else if(m==="robber"){
+  } else if(sm==="robber"){
     hexes.forEach((h,hi)=>{ if(hi===S.robberHex)return;
       const pts=h.corners.map(c=>vertices[c].x+","+vertices[c].y).join(" ");
       const poly=el("polygon",{points:pts,class:"cand-hex pulse cand"},layers.interact);
@@ -1526,24 +1496,29 @@ function renderPlayers(){
 }
 function renderPrompt(){
   const pr=$("prompt"); let t="";
+  if(!S){ pr.innerHTML="Welcome to the island."; return; }
+  const mine=myTurn();
+  const name=PLAYER_NAMES[S.cur];
+  const who=mine?"You":name;                       // subject
+  const poss=mine?"Your":(name+"'s");              // possessive
   if(S.phase==="setup"){
-    const who=PLAYER_NAMES[S.cur];
     const round=S.setupIdx<S.nPlayers?"first":"second";
-    if(S.mode==="setupSettlement") t=`<strong>${who}</strong>, place your ${round} settlement. Tap a glowing spot on the island.`;
-    else t=`<strong>${who}</strong>, place a road touching that settlement.`;
+    if(S.mode==="setupSettlement") t=mine?`<strong>You</strong>, place your ${round} settlement. Tap a glowing spot on the island.`:`<strong>${name}</strong> is placing their ${round} settlement.`;
+    else t=mine?`<strong>You</strong>, place a road touching that settlement.`:`<strong>${name}</strong> is placing a road.`;
   } else if(S.phase==="over"){
     t=`<strong>${PLAYER_NAMES[S.winner]}</strong> wins with 10 victory points! 🏆`;
-  } else {
-    const who=PLAYER_NAMES[S.cur];
-    if(S.pendingRobber) t=`<strong>${who}</strong> rolled a 7 — tap a hex to move the robber.`;
-    else if(S.mode==="robber") t=`<strong>${who}</strong> played a Knight — tap a hex to move the robber and steal.`;
-    else if(S.mode==="roadBuild") t=`<strong>${who}</strong>, place ${S.freeRoadsLeft} free road${S.freeRoadsLeft===1?"":"s"} (Road Building).`;
-    else if(S.mode==="settlement") t="Tap a glowing intersection to build your settlement.";
-    else if(S.mode==="road") t="Tap a glowing slot to build your road.";
-    else if(S.mode==="city") t="Tap one of your settlements to upgrade it to a city.";
-    else if(!S.hasRolled) t=`<strong>${who}'s</strong> turn — roll the dice to begin.`;
-    else t=`<strong>${who}</strong>, build what you can, then end your turn.`;
-  }
+  } else if(S.discardQueue){
+    t=`A 7 was rolled — players holding over 7 cards must discard.`;
+  } else if(S.mode==="robber"){
+    if(S.pendingRobber) t=`<strong>${who}</strong> rolled a 7 — ${mine?"tap a hex to move the robber.":"moving the robber."}`;
+    else t=`<strong>${who}</strong> played a Knight — ${mine?"tap a hex to move the robber and steal.":"moving the robber."}`;
+  } else if(S.mode==="roadBuild"){
+    t=`<strong>${who}</strong>${mine?", place":" places"} ${S.freeRoadsLeft} free road${S.freeRoadsLeft===1?"":"s"} (Road Building).`;
+  } else if(mine&&uiMode==="settlement") t="Tap a glowing intersection to build your settlement.";
+  else if(mine&&uiMode==="road") t="Tap a glowing slot to build your road.";
+  else if(mine&&uiMode==="city") t="Tap one of your settlements to upgrade it to a city.";
+  else if(!S.hasRolled) t=`<strong>${poss}</strong> turn — ${mine?"roll the dice to begin.":"waiting to roll."}`;
+  else t=mine?`<strong>Your</strong> turn — build what you can, then end your turn.`:`<strong>${name}</strong> is taking their turn.`;
   pr.innerHTML=t;
 }
 function renderActions(){
@@ -1559,23 +1534,24 @@ function renderActions(){
     tip.textContent="Setup round — placing starting settlements & roads.";
     box.appendChild(tip); return;
   }
-  if(S.phase==="over"){ mk("Play again","primary span2",()=>{renderSetup();$("overlay").classList.remove("hidden");}); return; }
+  if(S.phase==="over"){ mk("Back to lobby","primary span2",backToLobby); return; }
 
-  const canAct=canActNow();
+  const mine=myTurn();
+  const canAct=canActNow()&&mine;
   const p=S.cur;
-  mk("Roll dice","primary span2",rollDice,S.hasRolled||S.pendingRobber);
+  mk("Roll dice","primary span2",rollDice,!mine||S.hasRolled||S.pendingRobber);
   mk("Build road","",()=>tryMode("road"),!canAct,"1 wood · 1 brick");
   mk("Build settlement","",()=>tryMode("settlement"),!canAct,"wood·brick·sheep·wheat");
   mk("Build city","",()=>tryMode("city"),!canAct,"3 ore · 2 wheat");
-  mk("Trade","",openTrade,!canAct,"bank · harbour · player");
+  mk("Trade","",openTrade,!canAct,"bank · harbour");
   const deckEmpty=S.deck.length===0;
   mk("Buy dev card","",buyDev,!canAct||deckEmpty||!canAfford(p,COST.dev),
     deckEmpty?"deck empty":"1 ore · 1 wheat · 1 sheep");
   const playable=DEV_TYPES.reduce((s,t)=>s+(S.players[p].dev[t]-S.players[p].devNew[t]),0);
-  mk("Play dev card","",openDevPlay,!canPlayDevNow()||S.devPlayedThisTurn||playable<=0,
+  mk("Play dev card","",openDevPlay,!mine||!canPlayDevNow()||S.devPlayedThisTurn||playable<=0,
     S.devPlayedThisTurn?"one per turn":"knight · roads · plenty · mono");
   mk("End turn","span2",endTurn,!canAct);
-  if(S.mode&&S.mode!=="robber"&&S.mode!=="roadBuild") mk("Cancel placement","cancel span2",cancelMode);
+  if(mine&&uiMode) mk("Cancel placement","cancel span2",cancelMode);
 }
 function renderLog(){
   const box=$("log"); box.innerHTML="";
@@ -1747,8 +1723,8 @@ let TRADE=null;
 const zeroRes=()=>({wood:0,brick:0,sheep:0,wheat:0,ore:0});
 
 function openTrade(){
-  if(S.phase!=="play"||!S.hasRolled||S.pendingRobber) return;
-  S.mode=null;                       // clear any pending build placement
+  if(!myTurn()||S.phase!=="play"||!S.hasRolled||S.pendingRobber) return;
+  uiMode=null;                       // clear any pending build placement
   TRADE={screen:"menu"};
   $("tradeOverlay").classList.remove("hidden");
   renderTrade(); renderAll();
@@ -1781,8 +1757,8 @@ function tradeMenuHTML(){
       <button class="trade-opt" ${hasH?"":"disabled"} onclick="tradeGoto('harbour')">
         <span class="to-title">Harbour · 3:1 / 2:1</span>
         <span class="to-sub">${hasH?"Use the better rates from your ports.":"You have no harbour access yet."}</span></button>
-      <button class="trade-opt" onclick="tradeGoto('player')">
-        <span class="to-title">Player</span><span class="to-sub">Offer a swap to an opponent.</span></button>
+      <button class="trade-opt" disabled>
+        <span class="to-title">Player</span><span class="to-sub">Player-to-player trades are disabled in online play for now.</span></button>
     </div>
     <div class="trade-foot"><button class="btn cancel" onclick="closeTrade()">Close</button></div>`;
 }
@@ -1828,11 +1804,8 @@ function maritimeHTML(harbour){
     </div>`;
 }
 function doMaritimeTrade(harbour){
-  const res=E.maritimeTrade(S, TRADE.give, TRADE.receive, harbour);
-  if(!res.ok){
-    if(res.reason==="bankout") flash("The bank is out of "+RES_SHORT[TRADE.receive].toLowerCase()+" — pick another resource.");
-    return;
-  }
+  if(!TRADE||!TRADE.give||!TRADE.receive) return;
+  sendAction("maritimeTrade",{give:TRADE.give, receive:TRADE.receive, harbour:!!harbour});
   SFX.play("trade");
   closeTrade();
 }
@@ -1957,17 +1930,12 @@ function discardAdjust(r,delta){
   renderDiscard();
 }
 function confirmDiscard(){
-  const res=E.applyDiscard(S, DISCARD.player, DISCARD.sel);
-  if(!res.ok) return;
-  DISCARD=null;
-  advanceDiscards();
-}
-/* Walk the discard queue: each player over the limit gets the discard dialog.
-   The engine advances the queue and, when everyone is done, hands over to the robber. */
-function advanceDiscards(){
-  const p=E.nextDiscarder(S);
-  if(p==null){ DISCARD=null; $("discardOverlay").classList.add("hidden"); renderAll(); return; }
-  openDiscard(p);                              // wait for confirmDiscard()
+  if(!DISCARD) return;
+  const need=DISCARD.need, sel=DISCARD.sel;
+  if(RES_ORDER.reduce((s,r)=>s+sel[r],0)!==need) return;
+  sendAction("applyDiscard",{sel});
+  // Close optimistically; the server broadcast confirms (and reopens if rejected).
+  DISCARD=null; $("discardOverlay").classList.add("hidden");
 }
 
 function openSteal(){ $("stealOverlay").classList.remove("hidden"); renderSteal(); }
@@ -1987,18 +1955,13 @@ function chooseSteal(v){ $("stealOverlay").classList.add("hidden"); finishRobber
 
 /* ================= DEVELOPMENT CARDS ================= */
 function buyDev(){
-  const res=E.buyDev(S);
-  if(!res.ok){
-    if(res.reason==="empty") flash("The development deck is empty.");
-    else if(res.reason==="afford") flash("Not enough resources — a development card costs "+costText(COST.dev)+".");
-    return;
-  }
+  if(!myTurn()) return;
+  sendAction("buyDev");
   SFX.play("dev");
-  renderAll();                                // a bought VP card can win immediately (handled in renderAll)
 }
 
 let DEV=null;
-function openDevPlay(){ if(!canPlayDevNow()) return; DEV={screen:"list"}; $("devOverlay").classList.remove("hidden"); renderDev(); }
+function openDevPlay(){ if(!myTurn()||!canPlayDevNow()) return; DEV={screen:"list"}; $("devOverlay").classList.remove("hidden"); renderDev(); }
 function closeDev(){ DEV=null; $("devOverlay").classList.add("hidden"); renderAll(); }
 function devGoList(){ DEV={screen:"list"}; renderDev(); }
 function renderDev(){
@@ -2036,18 +1999,14 @@ function devListHTML(){
     <div class="trade-foot"><button class="btn cancel" onclick="closeDev()">Close</button></div>`;
 }
 function devPlayKnight(){
-  const res=E.playKnight(S);
-  if(!res.ok) return;
-  DEV=null; $("devOverlay").classList.add("hidden");
-  if(!res.over) SFX.play("dev");                // on a win, renderAll plays the win cue instead
-  renderAll();
-}
-function devPlayRoad(){
-  const res=E.playRoadBuilding(S);
-  if(!res.ok) return;
+  sendAction("playKnight");
   DEV=null; $("devOverlay").classList.add("hidden");
   SFX.play("dev");
-  renderAll();
+}
+function devPlayRoad(){
+  sendAction("playRoadBuilding");
+  DEV=null; $("devOverlay").classList.add("hidden");
+  SFX.play("dev");
 }
 function devPlayPlentyStart(){
   if(S.players[S.cur].dev.plenty-S.players[S.cur].devNew.plenty<=0||S.devPlayedThisTurn) return;
@@ -2090,11 +2049,9 @@ function devPlentyAdjust(r,delta){
   renderDev();
 }
 function confirmPlenty(){
-  const res=E.playYearOfPlenty(S, DEV.sel);
-  if(!res.ok) return;
+  sendAction("playYearOfPlenty",{sel:DEV.sel});
   SFX.play("dev");
   DEV=null; $("devOverlay").classList.add("hidden");
-  renderAll();
 }
 function devMonoHTML(){
   const cells=RES_ORDER.map(r=>resCellHTML(r,DEV.pick===r,false,"",`devMonoPick('${r}')`)).join("");
@@ -2109,11 +2066,10 @@ function devMonoHTML(){
 }
 function devMonoPick(r){ DEV.pick=r; renderDev(); }
 function confirmMono(){
-  const res=E.playMonopoly(S, DEV.pick);
-  if(!res.ok) return;
+  if(!DEV||!DEV.pick) return;
+  sendAction("playMonopoly",{r:DEV.pick});
   SFX.play("dev");
   DEV=null; $("devOverlay").classList.add("hidden");
-  renderAll();
 }
 
 /* ================= GAME-OVER SCOREBOARD ================= */
@@ -2124,9 +2080,7 @@ function showGameOverScoreboard(){
   if(!reduceMotion()){ m.classList.remove("ease-in"); void m.offsetWidth; m.classList.add("ease-in"); }
 }
 function closeGameOver(){
-  $("gameOverOverlay").classList.add("hidden");
-  renderSetup();
-  $("overlay").classList.remove("hidden");
+  backToLobby();
 }
 function gameOverHTML(){
   const sorted=[...S.players].sort((a,b)=>b.vp-a.vp);
@@ -2211,7 +2165,7 @@ function gameOverAwardsHTML(){
 }
 
 /* ---------------- Init ---------------- */
-$("newGameBtn").addEventListener("click",()=>{renderSetup();$("overlay").classList.remove("hidden");});
+$("newGameBtn").addEventListener("click",backToLobby);
 function openRules(){ $("rulesModal").scrollTop=0; $("rulesOverlay").classList.remove("hidden"); }
 function closeRules(){ $("rulesOverlay").classList.add("hidden"); }
 $("rulesBtn").addEventListener("click",openRules);
@@ -2240,15 +2194,29 @@ refreshSoundUI();
   bindGameState(idle);
   drawStaticBoard();
 })();
-renderSetup();
+// ---- Online lobby init: remember the player's name and wire the name input. --
+(function initLobby(){
+  try{ myName=localStorage.getItem('catanName')||myName; }catch(e){}
+  const inp=$("nameInput");
+  if(inp){
+    inp.value=myName;
+    inp.addEventListener("input",()=>{
+      myName=inp.value.trim()||"Player";
+      try{ localStorage.setItem('catanName',myName); }catch(e){}
+      emitJoin();                 // update our name in the room roster live
+    });
+  }
+  renderLobby([]);
+})();
 </script>
 
 <!-- ───────────────────────────────────────────────────────────────────
-     Multiplayer plumbing (step 1): room + live "who's here" indicator.
-     This is intentionally isolated from the game logic above. It only
-     touches the #connBar indicator and never affects how the game plays.
-     If socket.io / the server isn't reachable, the game runs normally
-     single-player and the indicator simply shows "disconnected".
+     Multiplayer network layer. The server is the single source of truth:
+     this layer carries the room join, ACTIONS up, and full STATE + the
+     client's own SEAT down. It bridges to the game script above through the
+     shared globals (socket, roomCode) and functions (applyServerState,
+     setSeat, renderLobby, emitJoin). If the server is unreachable the page
+     still shows the lobby, but no shared game can start.
      ─────────────────────────────────────────────────────────────────── -->
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -2280,6 +2248,7 @@ renderSetup();
     // Don't reload — just update the address bar so the link is shareable.
     window.history.replaceState(null, '', newUrl);
   }
+  roomCode = room;          // share the room code with the game script above
   roomEl.textContent = room;
 
   // ---- Indicator rendering -------------------------------------------------
@@ -2290,36 +2259,52 @@ renderSetup();
 
   function renderRoster(members){
     connBar.classList.add('online');
-    if (!Array.isArray(members) || members.length === 0){
+    var list = Array.isArray(members) ? members : [];
+    if (list.length === 0){
       whoEl.textContent = 'connected';
-      return;
+    } else {
+      var names = list.map(function(m){ return (m && m.name) ? m.name : 'Player'; });
+      whoEl.textContent = names.length + ' here · ' + names.join(', ');
     }
-    var names = members.map(function(m){
-      return (m && m.name) ? m.name : 'Player';
-    });
-    whoEl.textContent = names.length + ' here · ' + names.join(', ');
+    renderLobby(list);      // keep the lobby's player list in sync
   }
 
-  // ---- Connect (same origin). If io() is unavailable, stay single-player. --
+  // ---- Connect (same origin). If io() is unavailable, no multiplayer. ------
   if (typeof io !== 'function'){
     setDisconnected('offline (no server)');
     return;
   }
 
-  var socket;
   try {
-    socket = io({ reconnection: true });
+    socket = io({ reconnection: true });   // assigns the shared `socket` above
   } catch (e){
     setDisconnected('offline');
     return;
   }
 
   socket.on('connect', function(){
-    socket.emit('join', { room: room, name: 'Player' });
+    emitJoin();                            // (re)join with our chosen name
   });
 
   socket.on('roster', function(members){
     renderRoster(members);
+  });
+
+  // Full game state after every change — replace local state and re-render.
+  socket.on('state', function(state){
+    try { applyServerState(state); }
+    catch (e){ console.error('applyServerState failed', e); }
+  });
+
+  // The server deals us our own seat (player index) when a game starts.
+  socket.on('seat', function(idx){
+    try { setSeat(idx); } catch (e){ console.error(e); }
+  });
+
+  // The engine rejected an action (not legal/allowed right now). Harmless —
+  // the authoritative state is unchanged; just nudge the prompt.
+  socket.on('actionRejected', function(){
+    if (typeof S !== 'undefined' && S && typeof flash === 'function') flash("That move isn't allowed right now.");
   });
 
   socket.on('disconnect', function(){
@@ -2327,7 +2312,7 @@ renderSetup();
   });
 
   socket.on('connect_error', function(){
-    setDisconnected('offline (single-player)');
+    setDisconnected('offline');
   });
 })();
 </script>
