@@ -584,6 +584,12 @@
     <div class="setup hidden" id="roomFull">
       <p class="lobby-intro">This room already has the maximum of 6 players. Ask the host for a new room link, or try again later.</p>
     </div>
+
+    <!-- Shown when the room's game has already started and we're not one of its
+         players (spectating is out of scope for now). -->
+    <div class="setup hidden" id="gameInProgress">
+      <p class="lobby-intro">This room's game is already in progress. Ask the players for a new room link to start a fresh game.</p>
+    </div>
   </div>
 </div>
 
@@ -916,7 +922,8 @@ let gameOverShown=false;    // ensures the game-over scoreboard/sound fire only 
 let me=null;                // this client's own seat (player index), dealt by the server
 let socket=null;            // the socket.io connection (assigned by the net layer below)
 let roomCode="";            // this page's room code (assigned by the net layer below)
-let myId=null;              // this client's socket id (set on connect, used to find my section)
+let roomToken="";           // this client's persistent identity in the room (localStorage)
+let myId=null;              // this client's identity = its room token (used to find my section)
 let gameRunning=false;      // whether a server game is in progress for this room
 let lobby={players:[],hostId:null,colors:[],board:'standard',canStart:false}; // latest server lobby state
 let uiMode=null;            // LOCAL build-placement selection: settlement|road|city
@@ -959,9 +966,11 @@ function plentyCap(){ return E.plentyCap(S); }
    The server is the single source of truth for the roster, the host, and
    everyone's names and colours. This client renders the broadcast lobby state
    and sends its OWN name/colour changes and (host only) the start request. */
-// Join the room. The server assigns us a default unique name and colour.
+// Join the room, identifying ourselves by our persistent token. The server maps
+// the token to our slot: a match reclaims it (reconnect), otherwise we're a new
+// player assigned a default unique name and colour.
 function emitJoin(){
-  if(socket && roomCode){ socket.emit('join', {room:roomCode}); }
+  if(socket && roomCode){ socket.emit('join', {room:roomCode, token:roomToken}); }
 }
 // Commit my name change to the server (it validates uniqueness and broadcasts).
 function commitName(){
@@ -995,10 +1004,19 @@ function startGame(){
   SFX.unlock();                          // the Start click is a user gesture — wake audio
   if(socket) socket.emit('startGame');
 }
-// Show either the lobby or the "room is full" message.
+// Show the "room is full" message instead of the lobby.
 function showRoomFull(){
   $("setup").classList.add("hidden");
+  $("gameInProgress").classList.add("hidden");
   $("roomFull").classList.remove("hidden");
+  $("overlay").classList.remove("hidden");
+}
+// Show the "game already in progress" message: an unrecognised token tried to
+// join a room whose game has already started, so there's no seat for them.
+function showGameInProgress(){
+  $("setup").classList.add("hidden");
+  $("roomFull").classList.add("hidden");
+  $("gameInProgress").classList.remove("hidden");
   $("overlay").classList.remove("hidden");
 }
 // Render the lobby from the latest server state. Called on every lobby broadcast,
@@ -2362,6 +2380,24 @@ refreshSoundUI();
   roomCode = room;          // share the room code with the game script above
   roomEl.textContent = room;
 
+  // ---- Persistent identity: a per-room token kept in localStorage. A refresh
+  // creates a new socket but reuses this token, so the server re-attaches us to
+  // our existing slot/seat instead of treating us as a brand-new player.
+  function getRoomToken(code){
+    var key = 'catanToken:' + code;
+    var t = null;
+    try { t = window.localStorage.getItem(key); } catch (e){}
+    if (!t){
+      t = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+      try { window.localStorage.setItem(key, t); } catch (e){}
+    }
+    return t;
+  }
+  roomToken = getRoomToken(room);   // share with the game script above
+  myId = roomToken;                 // our identity in the lobby is our token
+
   // ---- Indicator rendering -------------------------------------------------
   function setDisconnected(msg){
     connBar.classList.remove('online');
@@ -2394,8 +2430,8 @@ refreshSoundUI();
   }
 
   socket.on('connect', function(){
-    myId = socket.id;                      // identify our own lobby section
-    emitJoin();                            // join — the server assigns name + colour
+    myId = roomToken;                      // our lobby identity is our persistent token
+    emitJoin();                            // join/reconnect — server maps token → slot
   });
 
   // Full lobby state after every change — render the player list, board
@@ -2412,6 +2448,14 @@ refreshSoundUI();
     connBar.classList.add('online');
     whoEl.textContent = 'room full';
     try { showRoomFull(); } catch (e){ console.error(e); }
+  });
+
+  // We tried to join a room whose game has already started, with a token the
+  // server doesn't recognise — there's no seat for us. Show the message.
+  socket.on('gameInProgress', function(){
+    connBar.classList.add('online');
+    whoEl.textContent = 'game in progress';
+    try { showGameInProgress(); } catch (e){ console.error(e); }
   });
 
   // The server rejected a name change (empty or duplicate). The authoritative
