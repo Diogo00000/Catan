@@ -209,7 +209,8 @@ function offerView(entry) {
     want: o.want,
     target: o.target,
     targets: Object.keys(o.responses).map(Number),
-    responses: o.responses
+    responses: o.responses,
+    counters: o.counters || {}
   };
 }
 
@@ -712,7 +713,7 @@ io.on('connection', (socket) => {
       : [target];
     const responses = {};
     targets.forEach((t) => { responses[t] = 'pending'; });
-    entry.offer = { proposerSeat: seat, give: give.map, want: want.map, target, responses };
+    entry.offer = { proposerSeat: seat, give: give.map, want: want.map, target, responses, counters: {} };
     broadcastOffer(room);
   });
 
@@ -725,6 +726,31 @@ io.on('connection', (socket) => {
     if (!o) return;
     if (!(seat in o.responses)) return socket.emit('tradeError', { reason: 'not-targeted' });
     o.responses[seat] = (msg && msg.accept) ? 'accepted' : 'declined';
+    // Accept/decline overrides and clears any counter this seat had standing.
+    if (o.counters) delete o.counters[seat];
+    broadcastOffer(room);
+  });
+
+  // A targeted player proposes their own terms back to the proposer instead of a
+  // plain accept/decline. `give` is what the counterer will give, `want` is what
+  // they want in return (their own perspective). They must hold what they give.
+  // Resubmitting replaces an earlier counter; a later accept/decline clears it.
+  socket.on('tradeCounter', (msg) => {
+    const ctx = myGame();
+    if (!ctx) return;
+    const { room, entry, seat } = ctx;
+    const game = entry.game;
+    const o = entry.offer;
+    if (!o) return;
+    if (!(seat in o.responses)) return socket.emit('tradeError', { reason: 'not-targeted' });
+
+    const give = cleanResMap(msg && msg.give);
+    const want = cleanResMap(msg && msg.want);
+    if (!give || !want || give.sum < 1 || want.sum < 1) return socket.emit('tradeError', { reason: 'invalid' });
+    if (!holdsResources(game, seat, give.map)) return socket.emit('tradeError', { reason: 'resources' });
+
+    o.responses[seat] = 'countered';
+    o.counters[seat] = { give: give.map, want: want.map };
     broadcastOffer(room);
   });
 
@@ -740,7 +766,8 @@ io.on('connection', (socket) => {
     if (seat !== o.proposerSeat) return socket.emit('tradeError', { reason: 'not-proposer' });
 
     const chosen = msg && msg.seat;
-    if (!isNum(chosen) || !(chosen in o.responses) || o.responses[chosen] !== 'accepted') {
+    const status = isNum(chosen) && (chosen in o.responses) ? o.responses[chosen] : null;
+    if (status !== 'accepted' && status !== 'countered') {
       return socket.emit('tradeError', { reason: 'choice' });
     }
     if (game.cur !== seat || !E.canActNow(game)) {
@@ -748,14 +775,31 @@ io.on('connection', (socket) => {
       broadcastOffer(room);
       return socket.emit('tradeError', { reason: 'phase' });
     }
+
+    // Resolve the trade terms and direction by status:
+    //  - accepted:  original terms — proposer gives offer.give, receives offer.want.
+    //  - countered: counter terms — the chosen seat gives counters[chosen].give and
+    //    wants counters[chosen].want, so the proposer gives counters[chosen].want and
+    //    receives counters[chosen].give.
+    let proposerGives, proposerWants;
+    if (status === 'accepted') {
+      proposerGives = o.give;
+      proposerWants = o.want;
+    } else {
+      const c = o.counters && o.counters[chosen];
+      if (!c) return socket.emit('tradeError', { reason: 'choice' });
+      proposerGives = c.want;
+      proposerWants = c.give;
+    }
+
     // Fresh re-validation: holdings may have changed since the offer was opened.
-    if (!holdsResources(game, seat, o.give) || !holdsResources(game, chosen, o.want)) {
+    if (!holdsResources(game, seat, proposerGives) || !holdsResources(game, chosen, proposerWants)) {
       entry.offer = null;
       broadcastOffer(room);
       return socket.emit('tradeError', { reason: 'stale' });
     }
 
-    const r = E.playerTrade(game, seat, chosen, o.give, o.want);
+    const r = E.playerTrade(game, seat, chosen, proposerGives, proposerWants);
     entry.offer = null;
     if (r && r.ok) {
       broadcastState(room);   // resource changes appear for everyone
