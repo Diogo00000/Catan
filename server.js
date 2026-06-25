@@ -18,9 +18,16 @@ app.use(express.static(path.join(__dirname)));
 
 const io = new Server(server);
 
-// roster: room code -> Map(socket.id -> { id, name }). Tracks who's connected to
-// each room, in join order (a Map preserves insertion order).
+// roster: room code -> Map(socket.id -> { id, name, color }). Tracks who's
+// connected to each room, in join order (a Map preserves insertion order). The
+// server is authoritative for everyone's name and colour: each is assigned a
+// unique default on join and may be changed by its owner until the game starts.
 const roster = new Map();
+
+// hosts: room code -> socket.id of the room's HOST (the first person to join).
+// The host is the only one who can start the game. Host-transfer on disconnect
+// is intentionally out of scope for now.
+const hosts = new Map();
 
 // games: room code -> { game, seats }. One authoritative game per room.
 //   game  — the engine game-state object (engine.createGame(...))
@@ -28,13 +35,64 @@ const roster = new Map();
 // A seat stays reserved if its socket disconnects (reconnection comes later).
 const games = new Map();
 
-// Broadcast the current member list of a room to everyone in that room, so each
-// client's "who's here" indicator and lobby list update live.
-function broadcastRoster(room) {
-  const members = roster.has(room)
-    ? Array.from(roster.get(room).values())
-    : [];
-  io.to(room).emit('roster', members);
+const MAX_PLAYERS = 6;
+// The game's colour set is the single source of truth for lobby colours too.
+const COLORS = E.DEFAULT_COLORS;
+
+// Members of a room in join order, or [] if the room is unknown.
+function membersOf(room) {
+  return roster.has(room) ? Array.from(roster.get(room).values()) : [];
+}
+
+// Pick a default unique name for a new joiner: the lowest "Player N" not already
+// taken in the room (case-sensitive comparison, matching the uniqueness rule).
+function defaultName(room) {
+  const taken = new Set(membersOf(room).map((m) => m.name));
+  for (let n = 1; ; n++) {
+    const name = 'Player ' + n;
+    if (!taken.has(name)) return name;
+  }
+}
+
+// Pick a default unique colour for a new joiner: the first colour in the set not
+// currently held by anyone in the room. (Capped at MAX_PLAYERS === COLORS.length,
+// so a free colour always exists for a seatable joiner.)
+function defaultColor(room) {
+  const taken = new Set(membersOf(room).map((m) => m.color));
+  return COLORS.find((c) => !taken.has(c)) || COLORS[0];
+}
+
+// Are all the lobby conditions for starting met? 3–6 players, every name a
+// non-empty unique string, every colour unique.
+function canStart(room) {
+  const members = membersOf(room);
+  const n = members.length;
+  if (n < 3 || n > MAX_PLAYERS) return false;
+  const names = members.map((m) => m.name);
+  if (names.some((nm) => !nm)) return false;
+  if (new Set(names).size !== n) return false;
+  if (new Set(members.map((m) => m.color)).size !== n) return false;
+  return true;
+}
+
+// The full lobby state every client renders from. Broadcast on every change so
+// the lobby stays consistent and live for everyone.
+function lobbyState(room) {
+  const members = membersOf(room);
+  return {
+    players: members.map((m) => ({ id: m.id, name: m.name, color: m.color })),
+    hostId: hosts.get(room) || null,
+    colors: COLORS,
+    // 3–4 players → standard board; 5–6 → extension board.
+    board: members.length >= 5 ? 'extension' : 'standard',
+    canStart: canStart(room)
+  };
+}
+
+// Broadcast the current lobby state to everyone in the room, so each client's
+// player list, board indicator, status and Start button update live.
+function broadcastLobby(room) {
+  io.to(room).emit('lobby', lobbyState(room));
 }
 
 // Broadcast the full game state of a room to everyone in it. Everyone renders
@@ -209,55 +267,117 @@ io.on('connection', (socket) => {
     const room = typeof data.room === 'string' ? data.room.trim() : '';
     if (!room) return;
 
-    const name = (typeof data.name === 'string' && data.name.trim())
-      ? data.name.trim().slice(0, 20)
-      : 'Player';
-
     // If this socket was already in a different room, leave it first.
     if (joinedRoom && joinedRoom !== room) {
       socket.leave(joinedRoom);
       const prev = roster.get(joinedRoom);
       if (prev) {
         prev.delete(socket.id);
-        if (prev.size === 0) roster.delete(joinedRoom);
-        else broadcastRoster(joinedRoom);
+        if (prev.size === 0) { roster.delete(joinedRoom); hosts.delete(joinedRoom); }
+        else broadcastLobby(joinedRoom);
       }
+    }
+
+    // Already in this room (e.g. a duplicate join) — nothing to add.
+    if (roster.has(room) && roster.get(room).has(socket.id)) {
+      socket.emit('lobby', lobbyState(room));
+      return;
+    }
+
+    // A game already running: let the joiner watch (no seat until reconnection
+    // support lands), but they do not enter the lobby roster.
+    if (games.has(room)) {
+      socket.join(room);
+      joinedRoom = room;
+      socket.emit('state', games.get(room).game);
+      const seat = games.get(room).seats.get(socket.id);
+      if (seat !== undefined) socket.emit('seat', seat);
+      return;
+    }
+
+    // Room full: do NOT seat a 7th player — tell them so they can show a
+    // "Room is full" message instead of the lobby.
+    if (membersOf(room).length >= MAX_PLAYERS) {
+      socket.emit('roomFull');
+      return;
     }
 
     socket.join(room);
     joinedRoom = room;
 
     if (!roster.has(room)) roster.set(room, new Map());
-    roster.get(room).set(socket.id, { id: socket.id, name });
+    // The first person to join becomes (and stays) the host.
+    if (!hosts.has(room)) hosts.set(room, socket.id);
+
+    // Assign a unique default name and colour; these count as the player's
+    // chosen name/colour unless they change them.
+    const name = defaultName(room);
+    const color = defaultColor(room);
+    roster.get(room).set(socket.id, { id: socket.id, name, color });
 
     console.log(`socket ${socket.id} joined room "${room}" as "${name}"`);
-    broadcastRoster(room);
-
-    // If a game is already running here, hand the joiner the current full state
-    // so they can watch (they have no seat until reconnection support lands).
-    if (games.has(room)) {
-      socket.emit('state', games.get(room).game);
-      const seat = games.get(room).seats.get(socket.id);
-      if (seat !== undefined) socket.emit('seat', seat);
-    }
+    broadcastLobby(room);
   });
 
-  // Start a game in this room. Any connected socket may trigger it. Ignored if
-  // a game is already running (unless the previous one is over).
+  // Change this socket's own name. Names must be non-empty and unique
+  // (case-sensitive). A duplicate is rejected and the previous name kept.
+  socket.on('setName', (payload) => {
+    const room = joinedRoom;
+    if (!room || !roster.has(room) || games.has(room)) return;
+    const me = roster.get(room).get(socket.id);
+    if (!me) return;
+
+    const name = (typeof payload === 'object' && payload && typeof payload.name === 'string')
+      ? payload.name.trim().slice(0, 20)
+      : '';
+    if (!name) {
+      socket.emit('nameRejected', { reason: 'empty' });
+      return;
+    }
+    // Case-sensitive uniqueness against every OTHER player.
+    const clash = membersOf(room).some((m) => m.id !== socket.id && m.name === name);
+    if (clash) {
+      socket.emit('nameRejected', { reason: 'taken' });
+      return;
+    }
+    me.name = name;
+    broadcastLobby(room);
+  });
+
+  // Change this socket's own colour. Must be a colour from the set and not
+  // currently held by another player.
+  socket.on('setColor', (payload) => {
+    const room = joinedRoom;
+    if (!room || !roster.has(room) || games.has(room)) return;
+    const me = roster.get(room).get(socket.id);
+    if (!me) return;
+
+    const color = (typeof payload === 'object' && payload) ? payload.color : null;
+    if (!COLORS.includes(color)) return;
+    const clash = membersOf(room).some((m) => m.id !== socket.id && m.color === color);
+    if (clash) return;            // taken — silently ignore (its swatch is disabled client-side)
+    me.color = color;
+    broadcastLobby(room);
+  });
+
+  // Start a game in this room. Only the HOST may trigger it, and only when all
+  // the lobby conditions hold. Ignored if a game is already running.
   socket.on('startGame', () => {
     const room = joinedRoom;
     if (!room || !roster.has(room)) return;
+    if (hosts.get(room) !== socket.id) return;               // host only
     const existing = games.get(room);
     if (existing && existing.game.phase !== 'over') return;  // already running
+    if (!canStart(room)) return;                             // conditions not met
 
-    const members = Array.from(roster.get(room).values());   // join order
-    if (members.length < 2) return;                          // need 2+ players
+    const members = membersOf(room);                         // join order
 
-    // Size the game to the connected players, using their join names and the
-    // engine's default colours.
+    // Size the game to the connected players, using each player's chosen name
+    // and colour, seated in join order.
     const game = E.createGame({
       nPlayers: members.length,
-      names: members.map((m) => m.name)
+      names: members.map((m) => m.name),
+      colors: members.map((m) => m.color)
     });
     game.gameId = room + ':' + Date.now();   // lets clients detect a fresh board
     E.beginSetupTurn(game);
@@ -302,13 +422,16 @@ io.on('connection', (socket) => {
       const members = roster.get(joinedRoom);
       members.delete(socket.id);
       if (members.size === 0) {
-        // Last one out: drop the roster and any game so a later visit to this
-        // (now empty) room starts clean. Seats are NOT reshuffled while anyone
-        // is still connected — a disconnected seat simply stays reserved.
+        // Last one out: drop the roster, host and any game so a later visit to
+        // this (now empty) room starts clean. Seats are NOT reshuffled while
+        // anyone is still connected — a disconnected seat simply stays reserved.
         roster.delete(joinedRoom);
+        hosts.delete(joinedRoom);
         games.delete(joinedRoom);
       } else {
-        broadcastRoster(joinedRoom);
+        // Their lobby section vanishes for everyone immediately. (Host-transfer
+        // when the host is the one who left is intentionally out of scope.)
+        broadcastLobby(joinedRoom);
       }
     }
   });
