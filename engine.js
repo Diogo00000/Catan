@@ -416,7 +416,10 @@ function resolveSteal(g,victim){
       g.players[g.cur].lifetimeRes++;                  // a stolen card is a card gained
       g.players[g.cur].cardsStolen++; g.players[victim].cardsStolenFrom++;
       stole=true;
-      pushLog(g,g.playerNames[g.cur]+" moves the robber and steals 1 "+RES_SHORT[r].toLowerCase()+" from "+g.playerNames[victim]+".",true);
+      // Privacy: the shared log must not reveal WHICH card was stolen. The robber
+      // learns it anyway because it appears in their own hand; everyone else only
+      // sees that a card changed hands.
+      pushLog(g,g.playerNames[g.cur]+" moves the robber and steals a card from "+g.playerNames[victim]+".",true);
     }
   }
   return {stole};
