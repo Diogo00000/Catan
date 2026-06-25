@@ -302,6 +302,7 @@
   .overlay{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:20px;
     background:radial-gradient(120% 100% at 50% 0%, rgba(28,94,108,.6), rgba(11,44,52,.82)); z-index:50;}
   .overlay.hidden{display:none;}
+  .setup.hidden{display:none;}
   .modal{background:linear-gradient(175deg,var(--parchment),var(--parchment-2)); border:1px solid var(--parchment-edge);
     border-radius:16px; box-shadow:var(--shadow); padding:30px 34px; max-width:430px; text-align:center;}
   .modal h1{font-family:'Cinzel',serif; font-weight:700; letter-spacing:6px; font-size:38px; margin:0 0 4px; color:var(--wood-dark);}
@@ -343,6 +344,19 @@
     font-size:11px; letter-spacing:.3px; color:#9c3b30; opacity:.85;}
   #startBtn{display:block; width:fit-content; margin-left:auto; flex:0 0 auto;}
   #startBtn:disabled{opacity:.4; cursor:not-allowed;}
+
+  /* ---------- Lobby (online pre-game) ---------- */
+  .lobby-intro{font-size:13px; line-height:1.6; color:var(--ink); margin:0 auto 16px; max-width:330px; text-align:center;}
+  .lobby-bar{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px;}
+  #copyLinkBtn{flex:0 0 auto;}
+  #copyLinkBtn.copied{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); border-color:var(--gold-deep);}
+  .board-indicator{font-family:'Cinzel',serif; font-weight:600; font-size:11px; letter-spacing:1px;
+    text-transform:uppercase; color:var(--wood-dark); text-align:right;}
+  .seat-name.readonly{background:rgba(255,255,255,.28); border-style:dashed; color:var(--ink-soft);}
+  .you-tag{flex:0 0 auto; font-family:'Outfit',sans-serif; font-style:normal; font-size:10px;
+    letter-spacing:.5px; text-transform:uppercase; color:var(--ink-soft); opacity:.7;}
+  .lobby-status{font-family:'Outfit',sans-serif; font-size:12px; letter-spacing:.3px; color:var(--ink-soft);
+    text-align:center; margin:14px 0 12px; min-height:16px;}
 
   /* ---------- Trade dialog ---------- */
   .harbour-line{font-size:10px; color:var(--ink-soft); margin-top:5px; letter-spacing:.3px;}
@@ -549,17 +563,26 @@
   <div class="modal" id="modal">
     <h1>CATAN</h1>
     <div class="sub">Settlers of the Island</div>
-    <p>Share this page's link (it carries the room code) so others can join. When everyone's here, anyone can start — you'll share <strong>one</strong> board and take turns.</p>
+
+    <!-- Lobby (pre-game). The server is authoritative for the roster, host,
+         names and colours; this panel renders the broadcast lobby state. -->
     <div class="setup" id="setup">
-      <div class="setup-row">
-        <span class="setup-lab">Your name</span>
-        <input type="text" id="nameInput" class="seat-name" maxlength="14" placeholder="Your name" aria-label="Your name">
+      <p class="lobby-intro">Share this page's link (it carries the room code) so others can join. Set your name and colour below — the host starts when everyone's ready.</p>
+      <div class="lobby-bar">
+        <button class="btn" id="copyLinkBtn" type="button" onclick="copyRoomLink()">Copy room link</button>
+        <span class="board-indicator" id="boardIndicator"></span>
       </div>
-      <div class="lobby-list" id="lobbyPlayers"></div>
+      <div class="seats" id="lobbyPlayers"></div>
+      <div class="lobby-status" id="lobbyStatus"></div>
       <div class="start-row">
         <span class="start-warn" id="startWarn" role="alert"></span>
         <button class="btn primary span2" id="startBtn" onclick="startGame()">Start game</button>
       </div>
+    </div>
+
+    <!-- Shown instead of the lobby when the room is already full (6 players). -->
+    <div class="setup hidden" id="roomFull">
+      <p class="lobby-intro">This room already has the maximum of 6 players. Ask the host for a new room link, or try again later.</p>
     </div>
   </div>
 </div>
@@ -893,9 +916,9 @@ let gameOverShown=false;    // ensures the game-over scoreboard/sound fire only 
 let me=null;                // this client's own seat (player index), dealt by the server
 let socket=null;            // the socket.io connection (assigned by the net layer below)
 let roomCode="";            // this page's room code (assigned by the net layer below)
-let myName="Player";        // the name this client joins with
+let myId=null;              // this client's socket id (set on connect, used to find my section)
 let gameRunning=false;      // whether a server game is in progress for this room
-let lastRoster=[];          // latest connected-players list (for the lobby)
+let lobby={players:[],hostId:null,colors:[],board:'standard',canStart:false}; // latest server lobby state
 let uiMode=null;            // LOCAL build-placement selection: settlement|road|city
 const $=id=>document.getElementById(id);
 
@@ -932,32 +955,128 @@ function canPlayDevNow(){ return E.canPlayDevNow(S); }
 function canPlayRoadBuilding(p){ return E.canPlayRoadBuilding(S,p); }
 function plentyCap(){ return E.plentyCap(S); }
 
-/* ---------------- Online lobby ---------------- */
-// Join (or re-join, e.g. after a name change) the room with the current name.
+/* ---------------- Online lobby ----------------
+   The server is the single source of truth for the roster, the host, and
+   everyone's names and colours. This client renders the broadcast lobby state
+   and sends its OWN name/colour changes and (host only) the start request. */
+// Join the room. The server assigns us a default unique name and colour.
 function emitJoin(){
-  if(socket && roomCode){ socket.emit('join', {room:roomCode, name:myName||'Player'}); }
+  if(socket && roomCode){ socket.emit('join', {room:roomCode}); }
 }
-// The Start button: ask the server to create the shared game. The server sizes
-// it to the connected players, deals seats and broadcasts the initial state.
+// Commit my name change to the server (it validates uniqueness and broadcasts).
+function commitName(){
+  const inp=$("myNameInput"); if(!inp || !socket) return;
+  const name=inp.value.trim();
+  socket.emit('setName', {name});
+}
+// Pick my colour (only enabled swatches call this). Server validates + broadcasts.
+function pickColor(hex){
+  if(socket) socket.emit('setColor', {color:hex});
+}
+// Copy the full room URL (incl. the code) to the clipboard.
+function copyRoomLink(){
+  const url=window.location.href;
+  const done=()=>{ const b=$("copyLinkBtn"); if(!b) return;
+    const t=b.textContent; b.textContent="Copied!"; b.classList.add("copied");
+    setTimeout(()=>{ b.textContent=t; b.classList.remove("copied"); }, 1400); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(done).catch(()=>fallbackCopy(url,done));
+  } else { fallbackCopy(url,done); }
+}
+function fallbackCopy(text,done){
+  try{ const ta=document.createElement('textarea'); ta.value=text;
+    ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done&&done();
+  }catch(e){}
+}
+// The Start button (host only): ask the server to create the shared game. The
+// server validates the start conditions, deals seats and broadcasts the state.
 function startGame(){
   SFX.unlock();                          // the Start click is a user gesture — wake audio
   if(socket) socket.emit('startGame');
 }
-// Render the lobby (connected players + Start button) inside the start overlay.
-function renderLobby(members){
-  if(Array.isArray(members)) lastRoster=members;
-  const list=lastRoster||[];
+// Show either the lobby or the "room is full" message.
+function showRoomFull(){
+  $("setup").classList.add("hidden");
+  $("roomFull").classList.remove("hidden");
+  $("overlay").classList.remove("hidden");
+}
+// Render the lobby from the latest server state. Called on every lobby broadcast,
+// so this redraws live as players join/leave or change name/colour.
+function renderLobby(state){
+  if(state) lobby=state;
+  const L=lobby, players=L.players||[], colors=L.colors||PALETTE.map(c=>c.hex);
+  const isHost = myId!=null && L.hostId===myId;
+  const usedColors = players.map(p=>p.color);
+  // Colour -> display name, from the shared PALETTE.
+  const cname=hex=>{ const c=PALETTE.find(c=>c.hex===hex); return c?c.name:hex; };
+
+  // Preserve an in-progress edit of my own name across re-renders triggered by
+  // OTHER players' changes (so a colour change elsewhere won't reset my typing).
+  const active=document.activeElement;
+  let editing=null;
+  if(active && active.id==="myNameInput"){
+    editing={value:active.value, start:active.selectionStart, end:active.selectionEnd};
+  }
+
   const box=$("lobbyPlayers");
   if(box){
-    box.innerHTML = list.length
-      ? list.map((m,i)=>`<div class="seat"><span class="seat-num">${i+1}</span>`+
-          `<span class="seat-name" style="display:flex;align-items:center">${escapeHtml(m.name||'Player')}`+
-          `${m.id===(socket&&socket.id)?' <em style="opacity:.6;font-style:normal;margin-left:6px">(you)</em>':''}</span></div>`).join("")
-      : `<div class="seat placeholder"><span class="seat-name" style="opacity:.6">Waiting for players to join…</span></div>`;
+    box.innerHTML = players.length
+      ? players.map((p,i)=>{
+          const mine = p.id===myId;
+          const swatches = colors.map(hex=>{
+            const sel = p.color===hex;
+            const heldByOther = usedColors.includes(hex) && p.color!==hex;
+            const disabled = !mine || heldByOther;
+            return `<button type="button" class="sw${sel?' sel':''}" style="background:${hex}" `+
+              `title="${escapeHtml(cname(hex))}" ${disabled?'disabled':''} `+
+              `${(mine&&!disabled)?`onclick="pickColor('${hex}')"`:''}></button>`;
+          }).join("");
+          const nameField = mine
+            ? `<input type="text" class="seat-name" id="myNameInput" maxlength="20" value="${escapeHtml(p.name)}" aria-label="Your name">`
+            : `<span class="seat-name readonly">${escapeHtml(p.name)}</span>`;
+          return `<div class="seat">`+
+            `<span class="seat-num">${i+1}</span>`+
+            nameField+
+            (mine?`<em class="you-tag">you</em>`:``)+
+            `<div class="swatches">${swatches}</div>`+
+          `</div>`;
+        }).join("")
+      : `<div class="seat placeholder"><span class="seat-name">Waiting…</span></div>`;
   }
-  const enough=list.length>=2;
-  const b=$("startBtn"); if(b) b.disabled=!enough||!socket;
-  const w=$("startWarn"); if(w) w.textContent=enough?"":"Need at least 2 players in the room to start.";
+
+  // Re-wire and restore my own name input.
+  const inp=$("myNameInput");
+  if(inp){
+    if(editing){ inp.value=editing.value;
+      inp.focus();
+      try{ inp.setSelectionRange(editing.start, editing.end); }catch(e){}
+    }
+    inp.addEventListener("change", commitName);
+    inp.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); inp.blur(); } });
+  }
+
+  // Board indicator (which board the current count will build).
+  const bi=$("boardIndicator");
+  if(bi) bi.textContent = (L.board==='extension')
+    ? 'Extension board · 5–6 players'
+    : 'Standard board · 3–4 players';
+
+  // Status line + Start button.
+  const n=players.length;
+  const st=$("lobbyStatus");
+  if(st){
+    if(n<3) st.textContent="Waiting for players to join…";
+    else if(!isHost) st.textContent="Waiting for host to start the game.";
+    else st.textContent="";
+  }
+  const b=$("startBtn");
+  if(b){
+    b.style.display = isHost ? "" : "none";
+    b.disabled = !(isHost && L.canStart && socket);
+  }
+  const w=$("startWarn");
+  if(w) w.textContent = (isHost && !L.canStart && n>=3) ? "Each player needs a unique name and colour." : "";
 }
 // Return to the lobby (e.g. after a game ends or via "New game").
 function backToLobby(){
@@ -965,6 +1084,8 @@ function backToLobby(){
   ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
   TRADE=DISCARD=DEV=null;
   $("overlay").classList.remove("hidden");
+  // Players stay in the server roster through a game, so the cached lobby state
+  // is still current — just re-render it. (The host can start a fresh game.)
   renderLobby();
 }
 
@@ -2194,19 +2315,9 @@ refreshSoundUI();
   bindGameState(idle);
   drawStaticBoard();
 })();
-// ---- Online lobby init: remember the player's name and wire the name input. --
+// ---- Online lobby init: draw the empty lobby until the server's state arrives.
 (function initLobby(){
-  try{ myName=localStorage.getItem('catanName')||myName; }catch(e){}
-  const inp=$("nameInput");
-  if(inp){
-    inp.value=myName;
-    inp.addEventListener("input",()=>{
-      myName=inp.value.trim()||"Player";
-      try{ localStorage.setItem('catanName',myName); }catch(e){}
-      emitJoin();                 // update our name in the room roster live
-    });
-  }
-  renderLobby([]);
+  renderLobby();
 })();
 </script>
 
@@ -2257,16 +2368,16 @@ refreshSoundUI();
     whoEl.textContent = msg || 'disconnected';
   }
 
-  function renderRoster(members){
+  // Update the connection bar's "who's here" summary from the lobby roster.
+  function renderConnWho(players){
     connBar.classList.add('online');
-    var list = Array.isArray(members) ? members : [];
+    var list = Array.isArray(players) ? players : [];
     if (list.length === 0){
       whoEl.textContent = 'connected';
     } else {
       var names = list.map(function(m){ return (m && m.name) ? m.name : 'Player'; });
       whoEl.textContent = names.length + ' here · ' + names.join(', ');
     }
-    renderLobby(list);      // keep the lobby's player list in sync
   }
 
   // ---- Connect (same origin). If io() is unavailable, no multiplayer. ------
@@ -2283,11 +2394,36 @@ refreshSoundUI();
   }
 
   socket.on('connect', function(){
-    emitJoin();                            // (re)join with our chosen name
+    myId = socket.id;                      // identify our own lobby section
+    emitJoin();                            // join — the server assigns name + colour
   });
 
-  socket.on('roster', function(members){
-    renderRoster(members);
+  // Full lobby state after every change — render the player list, board
+  // indicator, status and Start button, and refresh the connection bar.
+  socket.on('lobby', function(state){
+    try {
+      renderConnWho(state && state.players);
+      renderLobby(state);
+    } catch (e){ console.error('renderLobby failed', e); }
+  });
+
+  // We tried to join a full room (6 players) — show the "room is full" message.
+  socket.on('roomFull', function(){
+    connBar.classList.add('online');
+    whoEl.textContent = 'room full';
+    try { showRoomFull(); } catch (e){ console.error(e); }
+  });
+
+  // The server rejected a name change (empty or duplicate). The authoritative
+  // lobby is unchanged; nudge the player to pick another.
+  socket.on('nameRejected', function(info){
+    // Re-render from the (unchanged) lobby state to restore the previous name,
+    // then surface the reason (renderLobby resets the warning, so set it after).
+    try { renderLobby(); } catch (e){}
+    var w = document.getElementById('startWarn');
+    if (w) w.textContent = (info && info.reason === 'taken')
+      ? 'That name is taken — choose another.'
+      : 'Name cannot be empty.';
   });
 
   // Full game state after every change — replace local state and re-render.

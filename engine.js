@@ -658,6 +658,7 @@ const CatanEngine={
   canActNow, canPlayDevNow, canPlayRoadBuilding, checkWin,
   pips, expectedPips, plentyCap, resList, pushLog,
   // constants & geometry
+  DEFAULT_COLORS,
   RES_ORDER, RES_SHORT, COST, LIMIT, DEV_TYPES, DEV_ALL, DEV_NAME,
   COUNTS_SMALL, COUNTS_LARGE, GEO:{R,W,VD,CX0,CY0}
 };
