@@ -199,11 +199,17 @@ function createGame(config){
     longestRoad:null,      // player index holding Longest Road (+2 VP)
     log:[]
   };
-  // snake setup order
-  const fwd=[...Array(n).keys()];
+  // Randomly choose which seat takes the very first setup placement, then build the
+  // snake order RELATIVE to it: forward through the seating from the starting seat
+  // for the first settlement+road round, then back in reverse for the second round.
+  // Normal play later proceeds forward from this same starting seat.
+  const startSeat=Math.floor(Math.random()*n);
+  g.startSeat=startSeat;
+  const fwd=Array.from({length:n},(_,k)=>(startSeat+k)%n);
   g.setupQueue=[...fwd,...[...fwd].reverse()];
   g.setupIdx=0;
   g.settlementsPlaced=Array(n).fill(0);
+  g.cur=startSeat;
   return g;
 }
 
@@ -357,7 +363,7 @@ function placeRoad(g,eid){
     g.setupIdx++;
     if(g.setupIdx<g.setupQueue.length){ beginSetupTurn(g); }
     else { // setup complete
-      g.phase="play"; g.cur=0; g.hasRolled=false; g.mode=null;
+      g.phase="play"; g.cur=g.startSeat; g.hasRolled=false; g.mode=null;
       pushLog(g,"Setup complete — let the trading begin!",true);
     }
     return {ok:true, setup:true};

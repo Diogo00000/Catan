@@ -1126,9 +1126,14 @@ function renderLobby(state){
   const w=$("startWarn");
   if(w) w.textContent = (isHost && !L.canStart && n>=3) ? "Each player needs a unique name and colour." : "";
 }
+// The "New game" button only makes sense before a game is running (pre-game /
+// lobby). There is no in-game restart, so it is hidden entirely once a game is
+// in progress; the "Rules" button stays visible throughout.
+function syncNewGameBtn(){ const b=$("newGameBtn"); if(b) b.style.display = gameRunning ? "none" : ""; }
 // Return to the lobby (e.g. after a game ends or via "New game").
 function backToLobby(){
   gameRunning=false;
+  syncNewGameBtn();
   ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
   TRADE=DISCARD=DEV=null; OFFER=null;
   $("overlay").classList.remove("hidden");
@@ -1158,6 +1163,7 @@ function applyServerState(state){
   }
   diffFX(fresh?null:prev, S);            // animation hints + sounds from what changed
   gameRunning=true;
+  syncNewGameBtn();
   $("overlay").classList.add("hidden");
   renderAll();
   syncDialogs();
