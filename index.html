@@ -226,6 +226,14 @@
     display:flex; flex-direction:column; gap:7px;
     border:1px solid rgba(107,79,46,.22); box-shadow:0 1px 3px rgba(0,0,0,.10);}
   .pcard.active{border:2.5px solid var(--pcol); box-shadow:0 1px 4px rgba(0,0,0,.12);}
+  /* Permanent "this is you" treatment — independent of whose turn it is, so it can
+     show together with the active-turn border above. */
+  .pcard.you{background:linear-gradient(var(--pc-band),var(--pc-band)) padding-box,
+    rgba(224,184,74,.10); box-shadow:0 0 0 2px var(--gold-deep) inset, 0 1px 3px rgba(0,0,0,.10);}
+  .pcard.you.active{box-shadow:0 0 0 2px var(--gold-deep) inset, 0 1px 4px rgba(0,0,0,.12);}
+  .pc-you{flex:0 0 auto; font-size:8.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+    color:var(--wood-dark); background:rgba(224,184,74,.42); border:1px solid var(--gold-deep);
+    border-radius:9px; padding:1px 6px; line-height:1.5;}
 
   /* 1) Header band — still-darker beige panel: colour swatch + name (left), badges, VP (right) */
   .pc-head{display:flex; align-items:center; gap:7px; padding:7px 10px;
@@ -250,6 +258,14 @@
   .pc-cell .rl{font-size:8.5px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; opacity:.9;}
   .pc-cell .rn{font-family:'Cinzel',serif; font-weight:700; font-size:16px; line-height:1;}
   .pc-cell.bump{animation:chipBump .35s ease;}
+  /* Opponent hand — public count only, drawn as a single face-down card (no breakdown). */
+  .pc-res-hidden{display:flex; align-items:center; gap:9px; padding:8px 12px; border-radius:11px;
+    background:repeating-linear-gradient(45deg,rgba(107,79,46,.10),rgba(107,79,46,.10) 6px,rgba(107,79,46,.16) 6px,rgba(107,79,46,.16) 12px);
+    border:1px dashed rgba(107,79,46,.35);}
+  .pc-res-hidden .pc-fd{display:inline-flex; color:var(--wood-dark); opacity:.85; flex:0 0 auto;}
+  .pc-res-hidden .pc-fd svg{width:20px; height:20px;}
+  .pc-fd-n{font-family:'Cinzel',serif; font-weight:700; font-size:18px; color:var(--wood-dark); line-height:1;}
+  .pc-fd-lab{font-size:10.5px; color:var(--ink-soft); font-weight:600;}
 
   /* 3) Player stats — darker-beige panel */
   .pc-stats{display:flex; padding:7px 6px; background:var(--pc-band); border-radius:10px;}
@@ -956,7 +972,13 @@ function bindGameState(g){
    The rendering / UI code below calls these exactly as before; each just forwards
    to the engine with the live game-state so call sites stay unchanged. */
 function ownCount(p,type){ return E.ownCount(S,p,type); }
-function totalCards(p){ return E.totalCards(S,p); }
+// Total resource cards held by player p. Our own hand (and, at game over, every
+// hand) arrives with a real `resources` map we can sum; for opponents during play
+// the server sends only the public count `resTotal`.
+function totalCards(p){ const pl=S&&S.players[p]; if(!pl) return 0; return pl.resources ? E.totalCards(S,p) : (pl.resTotal||0); }
+// Development cards held by player p (count only). Own/revealed hands carry the
+// real `dev` map; opponents carry only the public count `devCount`.
+function devCount(p){ const pl=S&&S.players[p]; if(!pl) return 0; return pl.dev ? DEV_ALL.reduce((s,t)=>s+pl.dev[t],0) : (pl.devCount||0); }
 function canAfford(p,cost){ return E.canAfford(S,p,cost); }
 function costText(cost){ return E.costText(cost); }
 function playerHarbours(p){ return E.playerHarbours(S,p); }
@@ -1605,36 +1627,54 @@ function renderPlayers(){
   const bumpOk=!reduceMotion()&&FX.prevRes;
   S.players.forEach(pl=>{
     const active=(pl.i===S.cur);
-    const card=document.createElement("div"); card.className="pcard"+(active?" active":"");
+    const isMe=(pl.i===me);
+    // The "you" treatment is PERMANENT (it never depends on whose turn it is); the
+    // active-turn highlight is a separate class, so both can show at once.
+    const card=document.createElement("div");
+    card.className="pcard"+(active?" active":"")+(isMe?" you":"");
     card.style.setProperty("--pcol", PLAYER_COLORS[pl.i]);   // own colour, used for the active-card border
     // Header awards — shown only while the player currently holds them.
     let badges="";
     if(S.longestRoad===pl.i) badges+=`<span class="pc-badge" title="Longest Road (+2 VP)">${PC_ICONS.road} +2</span>`;
     if(S.largestArmy===pl.i) badges+=`<span class="pc-badge" title="Largest Army (+2 VP)">${PC_ICONS.army} +2</span>`;
-    // Resources bar — five equal cells in their tile colours.
-    let cells="";
-    const prev=FX.prevRes?FX.prevRes[pl.i]:null;
-    RES_ORDER.forEach(r=>{
-      const inc=bumpOk&&prev&&pl.resources[r]>prev[r];     // tick up only when a count actually grew
-      const dark=(r==='sheep'||r==='wheat');               // light tiles need dark text
-      cells+=`<div class="pc-cell${inc?" bump":""}" style="background:${TILE_COLORS[r]};color:${dark?'#3a2e10':'#fff'}">`+
-        `<span class="rl">${RES_SHORT[r]}</span><span class="rn">${pl.resources[r]}</span></div>`;});
+    // Resources area. We render the five real tiles ONLY when we hold this player's
+    // private resource map — our own hand always, and everyone's at game over
+    // (the server reveals final hands then). For opponents during play we have no
+    // breakdown, only the public total, shown colonist-style as a face-down hand.
+    const cardsN=totalCards(pl.i);
+    let resHTML;
+    if(pl.resources){
+      let cells="";
+      const prev=FX.prevRes?FX.prevRes[pl.i]:null;
+      RES_ORDER.forEach(r=>{
+        const inc=bumpOk&&prev&&pl.resources[r]>prev[r];     // tick up only when a count actually grew
+        const dark=(r==='sheep'||r==='wheat');               // light tiles need dark text
+        cells+=`<div class="pc-cell${inc?" bump":""}" style="background:${TILE_COLORS[r]};color:${dark?'#3a2e10':'#fff'}">`+
+          `<span class="rl">${RES_SHORT[r]}</span><span class="rn">${pl.resources[r]}</span></div>`;});
+      resHTML=`<div class="pc-res">${cells}</div>`;
+    } else {
+      resHTML=`<div class="pc-res-hidden" title="Resource cards held (hidden — count only)">
+        <span class="pc-fd">${PC_ICONS.cards}</span>
+        <span class="pc-fd-n">${cardsN}</span>
+        <span class="pc-fd-lab">card${cardsN===1?"":"s"} in hand</span></div>`;
+    }
     // Ports — one token per distinct type, generic 3:1 first then 2:1 ports in resource order.
     const hTypes=new Set(playerHarbours(pl.i).map(h=>h.type));
     let tokens="";
     if(hTypes.has("3:1")) tokens+=`<span class="pc-token" title="Generic 3:1 port">${PC_ICONS.anchor} 3:1 Any</span>`;
     RES_ORDER.forEach(r=>{ if(hTypes.has(r)) tokens+=`<span class="pc-token" title="2:1 ${RES_SHORT[r]} port"><span class="dot" style="background:${TILE_COLORS[r]}"></span> 2:1 ${PORT_SHORT[r]}</span>`; });
-    const devHeld=DEV_ALL.reduce((s,t)=>s+pl.dev[t],0);
+    const devHeld=devCount(pl.i);
     card.innerHTML=`
       <div class="pc-head">
         <span class="pc-swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>
         <span class="pc-name">${PLAYER_NAMES[pl.i]}</span>
+        ${isMe?`<span class="pc-you" title="This is your hand">You</span>`:""}
         <span class="pc-badges">${badges}</span>
         <span class="pc-vp" title="Victory points"><span class="n">${pl.vp}</span><span class="l">VP</span></span>
       </div>
-      <div class="pc-res">${cells}</div>
+      ${resHTML}
       <div class="pc-stats">
-        <span class="pc-stat" title="Resource cards in hand">${PC_ICONS.cards}<b>${totalCards(pl.i)}</b> cards</span>
+        <span class="pc-stat" title="Resource cards in hand">${PC_ICONS.cards}<b>${cardsN}</b> cards</span>
         <span class="pc-stat" title="Longest road length">${PC_ICONS.road}<b>${pl.roadLen||0}</b> road</span>
         <span class="pc-stat" title="Development cards held">${PC_ICONS.dev}<b>${devHeld}</b> dev</span>
         <span class="pc-stat" title="Knights played">${PC_ICONS.knight}<b>${pl.playedKnights}</b> knights</span>
@@ -1646,7 +1686,8 @@ function renderPlayers(){
     box.appendChild(card);
   });
   // Remember the live counts so the next render can detect (and bump) increases.
-  FX.prevRes=S.players.map(pl=>Object.assign({},pl.resources));
+  // (Opponents have no resource map; fall back to an empty object so this is safe.)
+  FX.prevRes=S.players.map(pl=>Object.assign({},pl.resources||{}));
 }
 function renderPrompt(){
   const pr=$("prompt"); let t="";
@@ -1701,7 +1742,9 @@ function renderActions(){
   const deckEmpty=S.deck.length===0;
   mk("Buy dev card","",buyDev,!canAct||deckEmpty||!canAfford(p,COST.dev),
     deckEmpty?"deck empty":"1 ore · 1 wheat · 1 sheep");
-  const playable=DEV_TYPES.reduce((s,t)=>s+(S.players[p].dev[t]-S.players[p].devNew[t]),0);
+  // Only my own hand is known to me; the play button is enabled only on my turn,
+  // so compute playable dev cards just for that case (opponents send no `dev`).
+  const playable=mine?DEV_TYPES.reduce((s,t)=>s+(S.players[p].dev[t]-S.players[p].devNew[t]),0):0;
   mk("Play dev card","",openDevPlay,!mine||!canPlayDevNow()||S.devPlayedThisTurn||playable<=0,
     S.devPlayedThisTurn?"one per turn":"knight · roads · plenty · mono");
   mk("End turn","span2",endTurn,!canAct);
@@ -1796,10 +1839,11 @@ function playerStatsHTML(final=false){
     const i=pl.i;
     const settle=ownCount(i,"settlement"), city=ownCount(i,"city"), roads=ownCount(i,"road");
     const lrVP=(S.longestRoad===i)?2:0, laVP=(S.largestArmy===i)?2:0;
-    const vpCards=final?pl.dev.vp:0;
+    // VP cards stay hidden during play; only the final (full-state) reveal exposes them.
+    const vpCards=(final&&pl.dev)?pl.dev.vp:0;
     const pubVP=settle*1+city*2+lrVP+laVP;
     const dispVP=pubVP+vpCards;
-    const held=Object.values(pl.dev).reduce((a,b)=>a+b,0);   // total dev cards in hand (incl. hidden VP)
+    const held=devCount(i);                                  // total dev cards in hand (count only)
     const inHand=totalCards(i);
     const actual=RES_ORDER.reduce((s,r)=>s+S.playerProduction[i][r],0);
     const exp=pl.expProd, diff=actual-exp;
@@ -1982,15 +2026,17 @@ function doMaritimeTrade(harbour){
 function resList(obj){ const a=RES_ORDER.filter(r=>obj[r]>0).map(r=>obj[r]+" "+RES_SHORT[r]); return a.length?a.join(", "):"nothing"; }
 
 /* ---- Proposer: build & send an offer (the server then runs the negotiation) ---- */
-// How many of resource r the proposer can ask for: capped by the most any single
-// possible accepter currently holds (the trade resolves with exactly one player).
+// How many of resource r the proposer can ask for. We can no longer see an
+// opponent's exact breakdown, so we cap by their PUBLIC total card count — an
+// upper bound on how many of any one resource they could hold. The server still
+// re-validates the chosen partner actually holds it before the trade executes.
 function wantMax(r){
   const p=S.cur;
   if(TRADE.target==="anyone"){
-    let mx=0; S.players.forEach(pl=>{ if(pl.i!==p) mx=Math.max(mx,pl.resources[r]); });
+    let mx=0; S.players.forEach(pl=>{ if(pl.i!==p) mx=Math.max(mx,totalCards(pl.i)); });
     return mx;
   }
-  if(TRADE.target!=null) return S.players[TRADE.target].resources[r];
+  if(TRADE.target!=null) return totalCards(TRADE.target);
   return 0;
 }
 function playerTradeHTML(){

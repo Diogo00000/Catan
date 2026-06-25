@@ -115,11 +115,75 @@ function broadcastLobby(room) {
   io.to(room).emit('lobby', lobbyState(room));
 }
 
-// Broadcast the full game state of a room to everyone in it. Everyone renders
-// from this; for now everyone sees the complete state (hands are hidden later).
+/* --------------------------------------------------------------------------
+   HIDDEN HANDS: each client sees its OWN private information plus everyone's
+   PUBLIC information — never the full authoritative game. viewFor() builds the
+   filtered state one SEAT is allowed to see. The complete game lives only here.
+
+   PRIVATE (owner only): a player's exact resource breakdown and the exact
+   development cards in their hand (including hidden Victory Point cards).
+   PUBLIC (everyone): the board / buildings / roads / robber / bank / dice /
+   turn & phase / awards, plus per player — name, colour, TOTAL resource-card
+   count, unplayed-dev count, played knights, longest-road length, harbours and
+   PUBLIC victory points (excluding hidden VP cards).
+   -------------------------------------------------------------------------- */
+function viewFor(game, seat) {
+  // Shallow copy: every PUBLIC top-level field (board geometry, bank, buildings,
+  // roads, robber, dice, phase, turn, awards, log, production stats, …) is shared
+  // by reference — we only read them to serialise, never mutate the view.
+  const view = Object.assign({}, game);
+
+  // The development deck's ORDER would reveal each player's next draw, so it is
+  // never sent. Clients only need its remaining length (e.g. "deck empty").
+  view.deck = game.deck.map(() => 0);
+
+  view.players = game.players.map((pl) => {
+    const mine = pl.i === seat;
+    const out = {
+      i: pl.i,
+      // Own entry: TRUE VP (includes own hidden VP cards). Others: PUBLIC VP only.
+      vp: mine ? pl.vp : pl.vp - pl.dev.vp,
+      // Public aggregates everyone may see.
+      resTotal: E.totalCards(game, pl.i),                      // total cards, not the types
+      devCount: E.DEV_ALL.reduce((s, t) => s + pl.dev[t], 0),  // unplayed dev count, not which
+      playedKnights: pl.playedKnights,
+      roadLen: pl.roadLen,
+      // Lifetime per-player stats (public; the live statistics panel renders these
+      // for everyone and none reveal a current hand's composition).
+      devBought: pl.devBought, devPlayed: pl.devPlayed,
+      lifetimeRes: pl.lifetimeRes, expProd: pl.expProd,
+      robberMoves: pl.robberMoves,
+      cardsStolen: pl.cardsStolen, cardsStolenFrom: pl.cardsStolenFrom,
+      tradesBank: pl.tradesBank, tradesHarbour: pl.tradesHarbour, tradesPlayer: pl.tradesPlayer,
+      discardsLost: pl.discardsLost
+    };
+    // Only the viewing seat gets its own exact resources and dev-card hand.
+    if (mine) {
+      out.resources = Object.assign({}, pl.resources);
+      out.dev = Object.assign({}, pl.dev);
+      out.devNew = Object.assign({}, pl.devNew);
+    }
+    return out;
+  });
+  return view;
+}
+
+// Send every connected socket in the room its OWN filtered view (per its seat).
+// Exception — game over: reveal the complete final state to everyone so the
+// end-of-game scoreboard can show each player's hidden VP cards and final hands.
 function broadcastState(room) {
   const entry = games.get(room);
-  if (entry) io.to(room).emit('state', entry.game);
+  if (!entry) return;
+  if (entry.game.phase === 'over') {
+    io.to(room).emit('state', entry.game);
+    return;
+  }
+  const slots = roster.get(room);
+  if (!slots) return;
+  slots.forEach((slot, token) => {
+    if (!slot.socketId) return;                 // skip disconnected slots
+    io.to(slot.socketId).emit('state', viewFor(entry.game, entry.seats.get(token)));
+  });
 }
 
 /* --------------------------------------------------------------------------
@@ -156,13 +220,16 @@ function broadcastOffer(room) {
   io.to(room).emit('tradeState', entry ? offerView(entry) : null);
 }
 
-// Send the current full game state plus the player's own seat to one socket, so
-// a reconnecting player drops straight back into the live board where it stands.
+// Send the current game state (filtered to the player's own seat) plus their
+// seat to one socket, so a reconnecting player drops straight back into the live
+// board where it stands — seeing their own hand but only counts for opponents.
+// (Once the game is over, the full state is sent so the scoreboard can reveal.)
 function sendGameTo(socketId, room, token) {
   const entry = games.get(room);
   if (!entry) return;
-  io.to(socketId).emit('state', entry.game);
   const seat = entry.seats.get(token);
+  const payload = entry.game.phase === 'over' ? entry.game : viewFor(entry.game, seat);
+  io.to(socketId).emit('state', payload);
   if (seat !== undefined) io.to(socketId).emit('seat', seat);
   // Drop the reconnecting player straight into any live trade negotiation too.
   io.to(socketId).emit('tradeState', offerView(entry));
@@ -563,9 +630,13 @@ io.on('connection', (socket) => {
 
     console.log(`game started in room "${room}" with ${members.length} players`);
 
-    // Broadcast the initial full state, then tell each connected socket its seat.
-    io.to(room).emit('state', game);
-    members.forEach((m, i) => { if (m.socketId) io.to(m.socketId).emit('seat', i); });
+    // Send each connected socket its OWN filtered view of the initial state, plus
+    // its seat. Nobody ever receives the complete game.
+    members.forEach((m, i) => {
+      if (!m.socketId) return;
+      io.to(m.socketId).emit('state', viewFor(game, i));
+      io.to(m.socketId).emit('seat', i);
+    });
   });
 
   // A player action: { type, ...params }. Validate against the engine, apply,
