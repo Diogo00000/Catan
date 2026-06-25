@@ -411,6 +411,14 @@
   .offer-row{display:flex; justify-content:space-between; gap:10px; font-size:13px; padding:4px 0;}
   .offer-side{font-weight:700;}
   .offer-arrow{text-align:center; color:var(--gold-deep); font-size:16px;}
+  .resp-list{display:flex; flex-direction:column; gap:7px;}
+  .offer-resp{display:flex; align-items:center; gap:8px; padding:6px 9px; border-radius:8px;
+    border:1px solid rgba(107,79,46,.2); background:rgba(255,255,255,.34); font-size:12.5px;}
+  .offer-resp.accepted{border-color:#4a7c4a; background:rgba(74,124,74,.12);}
+  .offer-resp.declined{opacity:.6;}
+  .resp-name{font-weight:700;}
+  .resp-status{margin-left:auto; font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--ink-soft);}
+  .offer-resp.accepted .resp-status{color:#3c6b3c;}
 
   /* ---------- Narrow screens (tablet portrait / phone) ---------- */
   @media (max-width:900px){
@@ -1100,7 +1108,7 @@ function renderLobby(state){
 function backToLobby(){
   gameRunning=false;
   ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
-  TRADE=DISCARD=DEV=null;
+  TRADE=DISCARD=DEV=null; OFFER=null;
   $("overlay").classList.remove("hidden");
   // Players stay in the server roster through a game, so the cached lobby state
   // is still current — just re-render it. (The host can start a fresh game.)
@@ -1122,7 +1130,7 @@ function applyServerState(state){
     gameOverShown=false;
     FX.prevRes=null; FX.newBuilding=null; FX.newRoad=null; FX.robberFrom=null; FX.diceRoll=false;
     // Clear any leftover dialogs from a previous game before drawing the new board.
-    TRADE=DISCARD=DEV=null;
+    TRADE=DISCARD=DEV=null; OFFER=null;
     ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
     drawStaticBoard();                   // board geometry is the server's — draw it
   }
@@ -1149,6 +1157,10 @@ function diffFX(prev,next){
     if(prev.roads[eid]===undefined){ FX.newRoad=+eid; SFX.play("road"); }
   }
   if(prev.robberHex!==next.robberHex){ FX.robberFrom=prev.robberHex; SFX.play("robber"); }
+  // A completed player-to-player trade bumps both parties' tradesPlayer counter.
+  for(let i=0;i<next.players.length;i++){
+    if(prev.players[i] && next.players[i].tradesPlayer>prev.players[i].tradesPlayer){ SFX.play("trade"); break; }
+  }
 }
 // Open / close the turn dialogs to match the current state and my seat.
 function syncDialogs(){
@@ -1160,11 +1172,14 @@ function syncDialogs(){
   const choose = me!=null && S.cur===me && Array.isArray(S.stealChoices) && S.stealChoices.length>0;
   if(choose){ if($("stealOverlay").classList.contains("hidden")) openSteal(); }
   else $("stealOverlay").classList.add("hidden");
-  // Trade / dev dialogs belong to the active player only.
+  // The local offer-building UI (TRADE) and the dev dialog belong to the active
+  // player only. The negotiation overlay (OFFER) is shared, so it's driven by
+  // renderTrade() below and stays open for responders/spectators on any turn.
   if(!myTurn()){
-    if(TRADE){ TRADE=null; $("tradeOverlay").classList.add("hidden"); }
+    if(TRADE) TRADE=null;
     if(DEV){ DEV=null; $("devOverlay").classList.add("hidden"); }
   }
+  renderTrade();
 }
 
 /* ---------------- Build placement (send actions to the server) ----------------
@@ -1858,7 +1873,8 @@ function renderAll(){
 }
 
 /* ================= TRADING ================= */
-let TRADE=null;
+let TRADE=null;             // LOCAL state of the proposer's offer-building UI
+let OFFER=null;             // server's live pending-offer view (negotiation), or null
 const zeroRes=()=>({wood:0,brick:0,sheep:0,wheat:0,ore:0});
 
 function openTrade(){
@@ -1872,17 +1888,31 @@ function closeTrade(){ TRADE=null; $("tradeOverlay").classList.add("hidden"); re
 
 function tradeGoto(screen){
   if(screen==="bank"||screen==="harbour") TRADE={screen, give:null, receive:null};
-  else if(screen==="player") TRADE={screen, stage:"build", partner:null, give:zeroRes(), receive:zeroRes()};
+  else if(screen==="player") TRADE={screen, target:"anyone", give:zeroRes(), receive:zeroRes()};
   else TRADE={screen:"menu"};
   renderTrade();
 }
+// Drives the single trade overlay from two sources: a live server negotiation
+// (OFFER) takes priority and is shown to everyone involved; otherwise the local
+// build UI (TRADE) is shown to the proposer. With neither, the overlay is hidden.
 function renderTrade(){
-  if(!TRADE) return;
-  const m=$("tradeModal");
-  if(TRADE.screen==="menu") m.innerHTML=tradeMenuHTML();
-  else if(TRADE.screen==="bank") m.innerHTML=maritimeHTML(false);
-  else if(TRADE.screen==="harbour") m.innerHTML=maritimeHTML(true);
-  else if(TRADE.screen==="player") m.innerHTML=playerTradeHTML();
+  const ov=$("tradeOverlay"), m=$("tradeModal");
+  if(OFFER){
+    if(me===OFFER.proposerSeat) m.innerHTML=offerProposerHTML();
+    else if(OFFER.targets.indexOf(me)>=0) m.innerHTML=offerResponderHTML();
+    else m.innerHTML=offerSpectatorHTML();
+    ov.classList.remove("hidden");
+    return;
+  }
+  if(TRADE){
+    if(TRADE.screen==="menu") m.innerHTML=tradeMenuHTML();
+    else if(TRADE.screen==="bank") m.innerHTML=maritimeHTML(false);
+    else if(TRADE.screen==="harbour") m.innerHTML=maritimeHTML(true);
+    else if(TRADE.screen==="player") m.innerHTML=playerTradeHTML();
+    ov.classList.remove("hidden");
+    return;
+  }
+  ov.classList.add("hidden");
 }
 
 function tradeMenuHTML(){
@@ -1896,8 +1926,8 @@ function tradeMenuHTML(){
       <button class="trade-opt" ${hasH?"":"disabled"} onclick="tradeGoto('harbour')">
         <span class="to-title">Harbour · 3:1 / 2:1</span>
         <span class="to-sub">${hasH?"Use the better rates from your ports.":"You have no harbour access yet."}</span></button>
-      <button class="trade-opt" disabled>
-        <span class="to-title">Player</span><span class="to-sub">Player-to-player trades are disabled in online play for now.</span></button>
+      <button class="trade-opt" onclick="tradeGoto('player')">
+        <span class="to-title">Player</span><span class="to-sub">Offer a trade to one player — or anyone at the table.</span></button>
     </div>
     <div class="trade-foot"><button class="btn cancel" onclick="closeTrade()">Close</button></div>`;
 }
@@ -1949,33 +1979,48 @@ function doMaritimeTrade(harbour){
   closeTrade();
 }
 
+function resList(obj){ const a=RES_ORDER.filter(r=>obj[r]>0).map(r=>obj[r]+" "+RES_SHORT[r]); return a.length?a.join(", "):"nothing"; }
+
+/* ---- Proposer: build & send an offer (the server then runs the negotiation) ---- */
+// How many of resource r the proposer can ask for: capped by the most any single
+// possible accepter currently holds (the trade resolves with exactly one player).
+function wantMax(r){
+  const p=S.cur;
+  if(TRADE.target==="anyone"){
+    let mx=0; S.players.forEach(pl=>{ if(pl.i!==p) mx=Math.max(mx,pl.resources[r]); });
+    return mx;
+  }
+  if(TRADE.target!=null) return S.players[TRADE.target].resources[r];
+  return 0;
+}
 function playerTradeHTML(){
   const p=S.cur;
-  if(TRADE.stage==="respond") return playerRespondHTML();
-  const partners=S.players.filter(pl=>pl.i!==p).map(pl=>
-    `<button class="partner${TRADE.partner===pl.i?" sel":""}" onclick="tradePickPartner(${pl.i})">
-      <span class="pswatch" style="background:${PLAYER_COLORS[pl.i]}"></span><span>${PLAYER_NAMES[pl.i]}</span>
+  const anyoneBtn=`<button class="partner${TRADE.target==="anyone"?" sel":""}" onclick="tradePickTarget('anyone')">
+      <span class="pswatch" style="background:#6b4f2e"></span><span>Anyone</span>
+      <span class="pcards">all players</span></button>`;
+  const partners=anyoneBtn+S.players.filter(pl=>pl.i!==p).map(pl=>
+    `<button class="partner${TRADE.target===pl.i?" sel":""}" onclick="tradePickTarget(${pl.i})">
+      <span class="pswatch" style="background:${PLAYER_COLORS[pl.i]}"></span><span>${escapeHtml(PLAYER_NAMES[pl.i])}</span>
       <span class="pcards">${totalCards(pl.i)} cards</span></button>`).join("");
-  const giveSteppers=stepperRowHTML("give",p);
-  const recvSteppers=TRADE.partner==null
-    ? `<div class="stepper-hint">Choose an opponent first.</div>` : stepperRowHTML("receive",TRADE.partner);
+  const giveSteppers=stepperRowHTML("give");
+  const recvSteppers=stepperRowHTML("receive");
   const gSum=RES_ORDER.reduce((s,r)=>s+TRADE.give[r],0);
   const rSum=RES_ORDER.reduce((s,r)=>s+TRADE.receive[r],0);
-  const ready=TRADE.partner!=null&&gSum>0&&rSum>0;
+  const ready=TRADE.target!=null&&gSum>0&&rSum>0;
   return `
-    <div class="trade-head"><h2>Player trade</h2><span class="trade-who">${PLAYER_NAMES[p]} offers</span></div>
-    <div class="trade-block"><div class="tb-lab">Trade with</div><div class="partners">${partners}</div></div>
+    <div class="trade-head"><h2>Player trade</h2><span class="trade-who">${escapeHtml(PLAYER_NAMES[p])} offers</span></div>
+    <div class="trade-block"><div class="tb-lab">Offer to</div><div class="partners">${partners}</div></div>
     <div class="trade-block"><div class="tb-lab">You give</div>${giveSteppers}</div>
-    <div class="trade-block"><div class="tb-lab">You ask for</div>${recvSteppers}</div>
+    <div class="trade-block"><div class="tb-lab">You want</div>${recvSteppers}</div>
     <div class="trade-foot">
       <button class="btn cancel" onclick="tradeGoto('menu')">Back</button>
       <button class="btn primary" ${ready?"":"disabled"} onclick="tradeSendOffer()">Send offer →</button>
     </div>`;
 }
-function stepperRowHTML(side,owner){
+function stepperRowHTML(side){
   const obj=TRADE[side];
   return `<div class="steppers">`+RES_ORDER.map(r=>{
-    const val=obj[r], max=S.players[owner].resources[r], dark=(r==="sheep"||r==="wheat");
+    const val=obj[r], max=(side==="give")?S.players[S.cur].resources[r]:wantMax(r), dark=(r==="sheep"||r==="wheat");
     return `<div class="stepper">
       <div class="st-swatch" style="background:${TILE_COLORS[r]};${dark?"color:#2c2117":"color:#fff"}">${RES_SHORT[r]}</div>
       <div class="st-ctl">
@@ -1986,47 +2031,99 @@ function stepperRowHTML(side,owner){
   }).join("")+`</div>`;
 }
 function tradeAdjust(side,r,delta){
-  const owner=(side==="give")?S.cur:TRADE.partner;
-  if(owner==null) return;
-  const max=S.players[owner].resources[r];
-  TRADE[side][r]=Math.max(0,Math.min(max,TRADE[side][r]+delta));
+  const max=(side==="give")?S.players[S.cur].resources[r]:wantMax(r);
+  TRADE[side][r]=Math.max(0,Math.min(max,(TRADE[side][r]||0)+delta));
   renderTrade();
 }
-function tradePickPartner(i){
-  TRADE.partner=i;
-  RES_ORDER.forEach(r=>{ TRADE.receive[r]=Math.min(TRADE.receive[r],S.players[i].resources[r]); });
+function tradePickTarget(t){
+  TRADE.target=t;
+  // Re-clamp the "want" amounts to what the new target could actually give.
+  RES_ORDER.forEach(r=>{ TRADE.receive[r]=Math.min(TRADE.receive[r],wantMax(r)); });
   renderTrade();
 }
 function tradeSendOffer(){
+  if(!TRADE||TRADE.screen!=="player") return;
   const gSum=RES_ORDER.reduce((s,r)=>s+TRADE.give[r],0);
   const rSum=RES_ORDER.reduce((s,r)=>s+TRADE.receive[r],0);
-  if(TRADE.partner==null||gSum===0||rSum===0) return;
-  TRADE.stage="respond"; renderTrade();
+  if(TRADE.target==null||gSum===0||rSum===0) return;
+  // The server validates, opens the offer, and broadcasts it back as OFFER, which
+  // then drives this overlay into the negotiation view (see the 'tradeState' event).
+  if(socket) socket.emit('tradeOffer',{give:TRADE.give, want:TRADE.receive, target:TRADE.target});
 }
-function tradeBackToBuild(){ TRADE.stage="build"; renderTrade(); }
-function resList(obj){ const a=RES_ORDER.filter(r=>obj[r]>0).map(r=>obj[r]+" "+RES_SHORT[r]); return a.length?a.join(", "):"nothing"; }
-function playerRespondHTML(){
-  const p=S.cur, q=TRADE.partner;
-  return `
-    <div class="trade-head"><h2>Offer to ${PLAYER_NAMES[q]}</h2></div>
-    <p class="trade-intro">Pass the device to <strong>${PLAYER_NAMES[q]}</strong> to respond.</p>
-    <div class="offer-card">
-      <div class="offer-row"><span class="offer-side" style="color:${PLAYER_COLORS[p]}">${PLAYER_NAMES[p]} gives</span><span>${resList(TRADE.give)}</span></div>
+
+/* ---- Live negotiation views, rendered from the server's OFFER broadcast ---- */
+function emitTradeRespond(accept){ if(socket) socket.emit('tradeRespond',{accept:!!accept}); }
+function emitTradeConfirm(seat){ if(socket) socket.emit('tradeConfirm',{seat}); }
+function emitTradeCancel(){ if(socket) socket.emit('tradeCancel'); }
+
+// The give→want summary card, from the proposer's point of view.
+function offerSummaryHTML(o){
+  return `<div class="offer-card">
+      <div class="offer-row"><span class="offer-side" style="color:${PLAYER_COLORS[o.proposerSeat]}">${escapeHtml(PLAYER_NAMES[o.proposerSeat])} gives</span><span>${resList(o.give)}</span></div>
       <div class="offer-arrow">⇅</div>
-      <div class="offer-row"><span class="offer-side" style="color:${PLAYER_COLORS[q]}">${PLAYER_NAMES[q]} gives</span><span>${resList(TRADE.receive)}</span></div>
-    </div>
-    <div class="trade-foot">
-      <button class="btn cancel" onclick="tradeBackToBuild()">Edit</button>
-      <button class="btn" style="border-color:#9c3b30;color:#9c3b30;background:transparent" onclick="tradeRespond(false)">Decline</button>
-      <button class="btn primary" onclick="tradeRespond(true)">Accept</button>
+      <div class="offer-row"><span class="offer-side">…and wants</span><span>${resList(o.want)}</span></div>
     </div>`;
 }
-function tradeRespond(accept){
-  const p=S.cur, q=TRADE.partner;
-  if(!accept){ E.pushLog(S, PLAYER_NAMES[q]+" declines "+PLAYER_NAMES[p]+"'s offer."); closeTrade(); return; }
-  const res=E.playerTrade(S, p, q, TRADE.give, TRADE.receive);
-  if(res.ok) SFX.play("trade");
-  closeTrade();
+// Proposer's view: each targeted player's response, a Trade button per accepter,
+// and a Cancel button.
+function offerProposerHTML(){
+  const o=OFFER;
+  const targetLabel=(o.target==="anyone")?"Anyone":escapeHtml(PLAYER_NAMES[o.target]);
+  const rows=o.targets.map(t=>{
+    const st=o.responses[t]||"pending";
+    const label=st==="accepted"?"Accepted":st==="declined"?"Declined":"Pending…";
+    const btn=(st==="accepted")
+      ? `<button class="btn primary" style="padding:5px 12px" onclick="emitTradeConfirm(${t})">Trade</button>` : "";
+    return `<div class="offer-resp ${st}">
+      <span class="pswatch" style="background:${PLAYER_COLORS[t]}"></span>
+      <span class="resp-name">${escapeHtml(PLAYER_NAMES[t])}</span>
+      <span class="resp-status">${label}</span>${btn}</div>`;
+  }).join("");
+  return `
+    <div class="trade-head"><h2>Your offer</h2><span class="trade-who">to ${targetLabel}</span></div>
+    ${offerSummaryHTML(o)}
+    <div class="trade-block"><div class="tb-lab">Responses</div><div class="resp-list">${rows}</div></div>
+    <div class="trade-foot">
+      <button class="btn cancel" onclick="emitTradeCancel()">Cancel offer</button>
+    </div>`;
+}
+// Targeted player's view: what's on offer and Accept / Decline.
+function offerResponderHTML(){
+  const o=OFFER, st=o.responses[me]||"pending";
+  const canGive=RES_ORDER.every(r=>S.players[me].resources[r]>=o.want[r]);
+  const card=`<div class="offer-card">
+      <div class="offer-row"><span class="offer-side">You receive</span><span>${resList(o.give)}</span></div>
+      <div class="offer-arrow">⇅</div>
+      <div class="offer-row"><span class="offer-side">You give</span><span>${resList(o.want)}</span></div>
+    </div>`;
+  let note="";
+  if(!canGive) note=`<div class="trade-summary">You don't have the resources this trade asks for.</div>`;
+  else if(st==="accepted") note=`<div class="trade-summary">You accepted — waiting for ${escapeHtml(PLAYER_NAMES[o.proposerSeat])} to confirm.</div>`;
+  else if(st==="declined") note=`<div class="trade-summary">You declined this offer.</div>`;
+  return `
+    <div class="trade-head"><h2>Trade offer</h2><span class="trade-who">from ${escapeHtml(PLAYER_NAMES[o.proposerSeat])}</span></div>
+    ${card}
+    ${note}
+    <div class="trade-foot">
+      <button class="btn" style="border-color:#9c3b30;color:#9c3b30;background:transparent" onclick="emitTradeRespond(false)">Decline</button>
+      <button class="btn primary" ${canGive?"":"disabled"} onclick="emitTradeRespond(true)">Accept</button>
+    </div>`;
+}
+// Anyone not involved: just a heads-up that a trade is being negotiated.
+function offerSpectatorHTML(){
+  const o=OFFER;
+  return `
+    <div class="trade-head"><h2>Trade in progress</h2><span class="trade-who">${escapeHtml(PLAYER_NAMES[o.proposerSeat])}</span></div>
+    <p class="trade-intro">${escapeHtml(PLAYER_NAMES[o.proposerSeat])} is negotiating a trade.</p>
+    ${offerSummaryHTML(o)}`;
+}
+function tradeErrText(reason){
+  switch(reason){
+    case "resources": case "stale": case "failed": return "Those resources aren't available any more.";
+    case "busy": return "Finish the current offer first.";
+    case "phase": return "You can only trade on your turn, after rolling.";
+    default: return "That trade isn't allowed right now.";
+  }
 }
 
 /* ================= ROBBER: DISCARD & STEAL DIALOGS ================= */
@@ -2479,6 +2576,20 @@ refreshSoundUI();
   // The server deals us our own seat (player index) when a game starts.
   socket.on('seat', function(idx){
     try { setSeat(idx); } catch (e){ console.error(e); }
+  });
+
+  // Live pending player-trade offer (or null when none). This drives the shared
+  // negotiation overlay for the proposer, responders and onlookers alike.
+  socket.on('tradeState', function(offer){
+    OFFER = offer || null;
+    if (OFFER) TRADE = null;          // the negotiation takes over the trade overlay
+    try { renderTrade(); } catch (e){ console.error('renderTrade failed', e); }
+  });
+
+  // The server refused a trade action (stale resources, wrong phase, …). The
+  // authoritative offer state is unchanged; just surface a short note.
+  socket.on('tradeError', function(info){
+    if (typeof flash === 'function') flash(tradeErrText(info && info.reason));
   });
 
   // The engine rejected an action (not legal/allowed right now). Harmless —
