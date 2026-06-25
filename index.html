@@ -1135,7 +1135,7 @@ function backToLobby(){
   gameRunning=false;
   syncNewGameBtn();
   ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
-  TRADE=DISCARD=DEV=null; OFFER=null;
+  TRADE=DISCARD=DEV=null; OFFER=null; COUNTER=null;
   $("overlay").classList.remove("hidden");
   // Players stay in the server roster through a game, so the cached lobby state
   // is still current — just re-render it. (The host can start a fresh game.)
@@ -1157,7 +1157,7 @@ function applyServerState(state){
     gameOverShown=false;
     FX.prevRes=null; FX.newBuilding=null; FX.newRoad=null; FX.robberFrom=null; FX.diceRoll=false;
     // Clear any leftover dialogs from a previous game before drawing the new board.
-    TRADE=DISCARD=DEV=null; OFFER=null;
+    TRADE=DISCARD=DEV=null; OFFER=null; COUNTER=null;
     ["gameOverOverlay","tradeOverlay","discardOverlay","stealOverlay","devOverlay"].forEach(id=>$(id).classList.add("hidden"));
     drawStaticBoard();                   // board geometry is the server's — draw it
   }
@@ -1925,6 +1925,7 @@ function renderAll(){
 /* ================= TRADING ================= */
 let TRADE=null;             // LOCAL state of the proposer's offer-building UI
 let OFFER=null;             // server's live pending-offer view (negotiation), or null
+let COUNTER=null;           // LOCAL state of a responder's counter-offer builder
 const zeroRes=()=>({wood:0,brick:0,sheep:0,wheat:0,ore:0});
 
 function openTrade(){
@@ -2104,9 +2105,37 @@ function tradeSendOffer(){
 }
 
 /* ---- Live negotiation views, rendered from the server's OFFER broadcast ---- */
-function emitTradeRespond(accept){ if(socket) socket.emit('tradeRespond',{accept:!!accept}); }
+function emitTradeRespond(accept){ COUNTER=null; if(socket) socket.emit('tradeRespond',{accept:!!accept}); }
 function emitTradeConfirm(seat){ if(socket) socket.emit('tradeConfirm',{seat}); }
 function emitTradeCancel(){ if(socket) socket.emit('tradeCancel'); }
+
+/* ---- Responder: build & send a counter-offer back to the proposer ---- */
+// COUNTER is the LOCAL state of a targeted player's counter builder (or null).
+// give = what I'll give (capped by my own holdings); want = what I want back from
+// the proposer (capped by their public card count — the server re-validates).
+function counterOpen(){
+  if(!OFFER) return;
+  const ex=OFFER.counters&&OFFER.counters[me];
+  COUNTER={give:ex?Object.assign(zeroRes(),ex.give):zeroRes(),
+           want:ex?Object.assign(zeroRes(),ex.want):zeroRes()};
+  renderTrade();
+}
+function counterCancel(){ COUNTER=null; renderTrade(); }
+function counterMax(side,r){
+  return (side==="give")?S.players[me].resources[r]:totalCards(OFFER.proposerSeat);
+}
+function counterAdjust(side,r,delta){
+  COUNTER[side][r]=Math.max(0,Math.min(counterMax(side,r),(COUNTER[side][r]||0)+delta));
+  renderTrade();
+}
+function counterSend(){
+  if(!COUNTER||!OFFER) return;
+  const gSum=RES_ORDER.reduce((s,r)=>s+COUNTER.give[r],0);
+  const wSum=RES_ORDER.reduce((s,r)=>s+COUNTER.want[r],0);
+  if(gSum===0||wSum===0) return;
+  if(socket) socket.emit('tradeCounter',{give:COUNTER.give, want:COUNTER.want});
+  COUNTER=null;   // the offer broadcast reflects the "countered" status
+}
 
 // The give→want summary card, from the proposer's point of view.
 function offerSummaryHTML(o){
@@ -2123,13 +2152,25 @@ function offerProposerHTML(){
   const targetLabel=(o.target==="anyone")?"Anyone":escapeHtml(PLAYER_NAMES[o.target]);
   const rows=o.targets.map(t=>{
     const st=o.responses[t]||"pending";
-    const label=st==="accepted"?"Accepted":st==="declined"?"Declined":"Pending…";
-    const btn=(st==="accepted")
-      ? `<button class="btn primary" style="padding:5px 12px" onclick="emitTradeConfirm(${t})">Trade</button>` : "";
+    const label=st==="accepted"?"Accepted":st==="declined"?"Declined":st==="countered"?"Countered":"Pending…";
+    let btn="", counterCard="";
+    if(st==="accepted"){
+      btn=`<button class="btn primary" style="padding:5px 12px" onclick="emitTradeConfirm(${t})">Trade</button>`;
+    } else if(st==="countered"){
+      // The counter is from t's perspective: they give c.give and want c.want, so
+      // the proposer would receive c.give and give c.want.
+      const c=(o.counters&&o.counters[t])||{give:zeroRes(),want:zeroRes()};
+      btn=`<button class="btn primary" style="padding:5px 12px" onclick="emitTradeConfirm(${t})">Accept counter</button>`;
+      counterCard=`<div class="offer-card" style="margin:6px 0 0;border-color:#b07b1f">
+          <div class="offer-row"><span class="offer-side">You receive</span><span>${resList(c.give)}</span></div>
+          <div class="offer-arrow">⇅</div>
+          <div class="offer-row"><span class="offer-side">You give</span><span>${resList(c.want)}</span></div>
+        </div>`;
+    }
     return `<div class="offer-resp ${st}">
       <span class="pswatch" style="background:${PLAYER_COLORS[t]}"></span>
       <span class="resp-name">${escapeHtml(PLAYER_NAMES[t])}</span>
-      <span class="resp-status">${label}</span>${btn}</div>`;
+      <span class="resp-status">${label}</span>${btn}</div>${counterCard}`;
   }).join("");
   return `
     <div class="trade-head"><h2>Your offer</h2><span class="trade-who">to ${targetLabel}</span></div>
@@ -2139,9 +2180,11 @@ function offerProposerHTML(){
       <button class="btn cancel" onclick="emitTradeCancel()">Cancel offer</button>
     </div>`;
 }
-// Targeted player's view: what's on offer and Accept / Decline.
+// Targeted player's view: what's on offer and Accept / Decline / Counter.
 function offerResponderHTML(){
   const o=OFFER, st=o.responses[me]||"pending";
+  // The counter builder takes over the responder view while it's open.
+  if(COUNTER) return counterBuilderHTML();
   const canGive=RES_ORDER.every(r=>S.players[me].resources[r]>=o.want[r]);
   const card=`<div class="offer-card">
       <div class="offer-row"><span class="offer-side">You receive</span><span>${resList(o.give)}</span></div>
@@ -2152,14 +2195,58 @@ function offerResponderHTML(){
   if(!canGive) note=`<div class="trade-summary">You don't have the resources this trade asks for.</div>`;
   else if(st==="accepted") note=`<div class="trade-summary">You accepted — waiting for ${escapeHtml(PLAYER_NAMES[o.proposerSeat])} to confirm.</div>`;
   else if(st==="declined") note=`<div class="trade-summary">You declined this offer.</div>`;
+  // While a counter stands, show its terms and let them change it.
+  let counterCard="";
+  if(st==="countered"){
+    const c=(o.counters&&o.counters[me])||{give:zeroRes(),want:zeroRes()};
+    counterCard=`<div class="offer-card" style="border-color:#b07b1f">
+        <div class="offer-row"><span class="offer-side">Your counter — you give</span><span>${resList(c.give)}</span></div>
+        <div class="offer-arrow">⇅</div>
+        <div class="offer-row"><span class="offer-side">…and want</span><span>${resList(c.want)}</span></div>
+      </div>
+      <div class="trade-summary">Countered — waiting for ${escapeHtml(PLAYER_NAMES[o.proposerSeat])} to accept.</div>`;
+  }
   return `
     <div class="trade-head"><h2>Trade offer</h2><span class="trade-who">from ${escapeHtml(PLAYER_NAMES[o.proposerSeat])}</span></div>
     ${card}
+    ${counterCard}
     ${note}
     <div class="trade-foot">
       <button class="btn" style="border-color:#9c3b30;color:#9c3b30;background:transparent" onclick="emitTradeRespond(false)">Decline</button>
+      <button class="btn" onclick="counterOpen()">${st==="countered"?"Change counter":"Counter"}</button>
       <button class="btn primary" ${canGive?"":"disabled"} onclick="emitTradeRespond(true)">Accept</button>
     </div>`;
+}
+// Responder's counter-offer builder: pick what to give (capped by holdings) and
+// what to want back from the proposer, then send it as a tradeCounter.
+function counterBuilderHTML(){
+  const o=OFFER;
+  const giveSteppers=counterStepperRowHTML("give");
+  const wantSteppers=counterStepperRowHTML("want");
+  const gSum=RES_ORDER.reduce((s,r)=>s+COUNTER.give[r],0);
+  const wSum=RES_ORDER.reduce((s,r)=>s+COUNTER.want[r],0);
+  const ready=gSum>0&&wSum>0;
+  return `
+    <div class="trade-head"><h2>Counter offer</h2><span class="trade-who">to ${escapeHtml(PLAYER_NAMES[o.proposerSeat])}</span></div>
+    <div class="trade-block"><div class="tb-lab">You give</div>${giveSteppers}</div>
+    <div class="trade-block"><div class="tb-lab">You want</div>${wantSteppers}</div>
+    <div class="trade-foot">
+      <button class="btn cancel" onclick="counterCancel()">Back</button>
+      <button class="btn primary" ${ready?"":"disabled"} onclick="counterSend()">Send counter →</button>
+    </div>`;
+}
+function counterStepperRowHTML(side){
+  const obj=COUNTER[side];
+  return `<div class="steppers">`+RES_ORDER.map(r=>{
+    const val=obj[r], max=counterMax(side,r), dark=(r==="sheep"||r==="wheat");
+    return `<div class="stepper">
+      <div class="st-swatch" style="background:${TILE_COLORS[r]};${dark?"color:#2c2117":"color:#fff"}">${RES_SHORT[r]}</div>
+      <div class="st-ctl">
+        <button ${val<=0?"disabled":""} onclick="counterAdjust('${side}','${r}',-1)">−</button>
+        <span class="st-val">${val}</span>
+        <button ${val>=max?"disabled":""} onclick="counterAdjust('${side}','${r}',1)">+</button>
+      </div><div class="st-max">/ ${max}</div></div>`;
+  }).join("")+`</div>`;
 }
 // Anyone not involved: just a heads-up that a trade is being negotiated.
 function offerSpectatorHTML(){
@@ -2635,6 +2722,7 @@ refreshSoundUI();
   socket.on('tradeState', function(offer){
     OFFER = offer || null;
     if (OFFER) TRADE = null;          // the negotiation takes over the trade overlay
+    else COUNTER = null;              // negotiation ended — drop any half-built counter
     try { renderTrade(); } catch (e){ console.error('renderTrade failed', e); }
   });
 
