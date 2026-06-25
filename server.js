@@ -122,6 +122,40 @@ function broadcastState(room) {
   if (entry) io.to(room).emit('state', entry.game);
 }
 
+/* --------------------------------------------------------------------------
+   PLAYER-TO-PLAYER TRADING (server-authoritative negotiation).
+   At most one offer is open per room at a time, held on the room's game entry
+   as `entry.offer`. Only the player whose turn it is may open one, and it is
+   cleared automatically when their turn ends or they truly leave. The offer is
+   negotiation metadata only — resources move solely through the engine's
+   playerTrade, on confirm, after a fresh re-validation.
+   An offer: { proposerSeat, give, want, target ( seat | "anyone" ),
+               responses: { seat -> "pending" | "accepted" | "declined" } }.
+   -------------------------------------------------------------------------- */
+
+// The serialisable view of a room's pending offer the clients render from, or
+// null if none. `targets` lists every seat that may respond (for "anyone", all
+// other seats; otherwise the single target), so the client needn't recompute it.
+function offerView(entry) {
+  const o = entry && entry.offer;
+  if (!o) return null;
+  return {
+    proposerSeat: o.proposerSeat,
+    give: o.give,
+    want: o.want,
+    target: o.target,
+    targets: Object.keys(o.responses).map(Number),
+    responses: o.responses
+  };
+}
+
+// Broadcast the room's current pending-offer state (or null) to everyone in it,
+// so the whole table sees the negotiation live on every change.
+function broadcastOffer(room) {
+  const entry = games.get(room);
+  io.to(room).emit('tradeState', entry ? offerView(entry) : null);
+}
+
 // Send the current full game state plus the player's own seat to one socket, so
 // a reconnecting player drops straight back into the live board where it stands.
 function sendGameTo(socketId, room, token) {
@@ -130,6 +164,8 @@ function sendGameTo(socketId, room, token) {
   io.to(socketId).emit('state', entry.game);
   const seat = entry.seats.get(token);
   if (seat !== undefined) io.to(socketId).emit('seat', seat);
+  // Drop the reconnecting player straight into any live trade negotiation too.
+  io.to(socketId).emit('tradeState', offerView(entry));
 }
 
 // A slot's grace window expired with no reconnect — treat it as a real
@@ -146,6 +182,13 @@ function onGraceExpired(room, token) {
   slot.graceTimer = null;
 
   if (games.has(room)) {
+    // A genuine departure cancels the leaver's open trade offer (their seat may
+    // stay reserved for a later reconnect, but the negotiation can't wait on them).
+    const entry = games.get(room);
+    if (entry.offer && entry.offer.proposerSeat === entry.seats.get(token)) {
+      entry.offer = null;
+      broadcastOffer(room);
+    }
     // Running game: keep the seat reserved and the game going for everyone else.
     // Only tear the room down once nobody is connected to it any more.
     const anyConnected = Array.from(slots.values()).some((s) => s.socketId);
@@ -191,6 +234,27 @@ function onGraceExpired(room, token) {
    re-broadcasts. The client is never trusted over the engine.
    -------------------------------------------------------------------------- */
 function isNum(v) { return typeof v === 'number' && isFinite(v); }
+
+// Validate a {wood,brick,…} resource map from a client. Returns a normalised map
+// (every resource present, non-negative integers) plus its total, or null if any
+// field is malformed. Used to vet the two sides of a player trade offer.
+function cleanResMap(m) {
+  if (!m || typeof m !== 'object') return null;
+  const map = {};
+  let sum = 0;
+  for (const r of E.RES_ORDER) {
+    const v = m[r] === undefined ? 0 : m[r];
+    if (typeof v !== 'number' || !isFinite(v) || v < 0 || Math.floor(v) !== v) return null;
+    map[r] = v;
+    sum += v;
+  }
+  return { map, sum };
+}
+
+// True if seat `p` currently holds at least the resources in `give`.
+function holdsResources(game, p, give) {
+  return E.RES_ORDER.every((r) => game.players[p].resources[r] >= give[r]);
+}
 
 // Apply one action for `seat` to `game`. Returns true if the game changed (and
 // should be re-broadcast), false if the action was rejected as illegal.
@@ -495,7 +559,7 @@ io.on('connection', (socket) => {
     // seat carries across reconnects.
     const seats = new Map();
     members.forEach((m, i) => seats.set(m.id, i));
-    games.set(room, { game, seats });
+    games.set(room, { game, seats, offer: null });
 
     console.log(`game started in room "${room}" with ${members.length} players`);
 
@@ -522,8 +586,124 @@ io.on('connection', (socket) => {
       changed = false;
     }
 
-    if (changed) broadcastState(room);
-    else socket.emit('actionRejected', { type: msg && msg.type });
+    if (changed) {
+      // A turn change (most often endTurn) ends the proposer's control over any
+      // open offer — drop it so it never lingers into another player's turn.
+      if (entry.offer && entry.offer.proposerSeat !== entry.game.cur) {
+        entry.offer = null;
+        broadcastOffer(room);
+      }
+      broadcastState(room);
+    } else {
+      socket.emit('actionRejected', { type: msg && msg.type });
+    }
+  });
+
+  /* ---- Player-to-player trade negotiation (separate from engine actions) ----
+     Each handler resolves the sender's room/seat, validates the sender is
+     allowed to send it, mutates the single pending offer, and re-broadcasts. */
+
+  // Resolve this socket's seat in its running game, or null if it has none.
+  function myGame() {
+    if (!joinedRoom) return null;
+    const entry = games.get(joinedRoom);
+    if (!entry) return null;
+    const seat = entry.seats.get(myToken);
+    if (seat === undefined) return null;
+    return { room: joinedRoom, entry, seat };
+  }
+
+  // Open an offer. Only the seat whose turn it is, in the trading phase, with no
+  // offer already pending, may do so. Requires a non-empty give and want, a valid
+  // target (another seat or "anyone"), and that the proposer holds what it gives.
+  socket.on('tradeOffer', (msg) => {
+    const ctx = myGame();
+    if (!ctx) return;
+    const { room, entry, seat } = ctx;
+    const game = entry.game;
+    if (entry.offer) return socket.emit('tradeError', { reason: 'busy' });
+    if (game.cur !== seat || !E.canActNow(game)) return socket.emit('tradeError', { reason: 'phase' });
+
+    const give = cleanResMap(msg && msg.give);
+    const want = cleanResMap(msg && msg.want);
+    if (!give || !want || give.sum < 1 || want.sum < 1) return socket.emit('tradeError', { reason: 'invalid' });
+
+    let target = msg && msg.target;
+    if (target !== 'anyone') {
+      if (!isNum(target) || target < 0 || target >= game.nPlayers || target === seat) {
+        return socket.emit('tradeError', { reason: 'target' });
+      }
+    }
+    if (!holdsResources(game, seat, give.map)) return socket.emit('tradeError', { reason: 'resources' });
+
+    const targets = target === 'anyone'
+      ? game.players.map((_, i) => i).filter((i) => i !== seat)
+      : [target];
+    const responses = {};
+    targets.forEach((t) => { responses[t] = 'pending'; });
+    entry.offer = { proposerSeat: seat, give: give.map, want: want.map, target, responses };
+    broadcastOffer(room);
+  });
+
+  // A targeted player accepts or declines the open offer.
+  socket.on('tradeRespond', (msg) => {
+    const ctx = myGame();
+    if (!ctx) return;
+    const { room, entry, seat } = ctx;
+    const o = entry.offer;
+    if (!o) return;
+    if (!(seat in o.responses)) return socket.emit('tradeError', { reason: 'not-targeted' });
+    o.responses[seat] = (msg && msg.accept) ? 'accepted' : 'declined';
+    broadcastOffer(room);
+  });
+
+  // The proposer finalises with one accepter. Re-validate both sides still hold
+  // the required resources (state may have changed), then execute via the engine.
+  socket.on('tradeConfirm', (msg) => {
+    const ctx = myGame();
+    if (!ctx) return;
+    const { room, entry, seat } = ctx;
+    const game = entry.game;
+    const o = entry.offer;
+    if (!o) return;
+    if (seat !== o.proposerSeat) return socket.emit('tradeError', { reason: 'not-proposer' });
+
+    const chosen = msg && msg.seat;
+    if (!isNum(chosen) || !(chosen in o.responses) || o.responses[chosen] !== 'accepted') {
+      return socket.emit('tradeError', { reason: 'choice' });
+    }
+    if (game.cur !== seat || !E.canActNow(game)) {
+      entry.offer = null;
+      broadcastOffer(room);
+      return socket.emit('tradeError', { reason: 'phase' });
+    }
+    // Fresh re-validation: holdings may have changed since the offer was opened.
+    if (!holdsResources(game, seat, o.give) || !holdsResources(game, chosen, o.want)) {
+      entry.offer = null;
+      broadcastOffer(room);
+      return socket.emit('tradeError', { reason: 'stale' });
+    }
+
+    const r = E.playerTrade(game, seat, chosen, o.give, o.want);
+    entry.offer = null;
+    if (r && r.ok) {
+      broadcastState(room);   // resource changes appear for everyone
+      broadcastOffer(room);   // negotiation is over
+    } else {
+      broadcastOffer(room);
+      socket.emit('tradeError', { reason: 'failed' });
+    }
+  });
+
+  // The proposer withdraws their open offer.
+  socket.on('tradeCancel', () => {
+    const ctx = myGame();
+    if (!ctx) return;
+    const { room, entry, seat } = ctx;
+    const o = entry.offer;
+    if (!o || seat !== o.proposerSeat) return;
+    entry.offer = null;
+    broadcastOffer(room);
   });
 
   socket.on('disconnect', (reason) => {
