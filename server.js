@@ -18,28 +18,47 @@ app.use(express.static(path.join(__dirname)));
 
 const io = new Server(server);
 
-// roster: room code -> Map(socket.id -> { id, name, color }). Tracks who's
-// connected to each room, in join order (a Map preserves insertion order). The
-// server is authoritative for everyone's name and colour: each is assigned a
-// unique default on join and may be changed by its owner until the game starts.
+/* --------------------------------------------------------------------------
+   RESILIENCE: players are identified by a persistent TOKEN, not a socket id.
+   A refresh or brief drop creates a new socket but reuses the same token (the
+   client stores it in localStorage per room), so the player reclaims their
+   existing lobby slot — and, once a game is running, their seat. A disconnect
+   does NOT immediately destroy a slot/seat: it starts a short GRACE timer, and
+   a re-join with the same token within that window seamlessly re-attaches.
+   -------------------------------------------------------------------------- */
+
+// roster: room code -> Map(token -> slot), in join order (a Map preserves
+// insertion order). A slot is the player's persistent identity in the room:
+//   { id: token, name, color, socketId, graceTimer }
+// `socketId` is the player's CURRENT live socket, or null while disconnected;
+// `graceTimer` is the pending real-departure timer while disconnected.
+// The server is authoritative for everyone's name and colour: each is assigned
+// a unique default on join and may be changed by its owner until the game starts.
 const roster = new Map();
 
-// hosts: room code -> socket.id of the room's HOST (the first person to join).
-// The host is the only one who can start the game. Host-transfer on disconnect
-// is intentionally out of scope for now.
+// hosts: room code -> TOKEN of the room's HOST (the first person to join). The
+// host is the only one who can start the game. If the host truly leaves before
+// the game starts (their grace expires), host transfers to the earliest-joined
+// remaining slot.
 const hosts = new Map();
 
 // games: room code -> { game, seats }. One authoritative game per room.
 //   game  — the engine game-state object (engine.createGame(...))
-//   seats — Map(socket.id -> player index), assigned at start in join order.
-// A seat stays reserved if its socket disconnects (reconnection comes later).
+//   seats — Map(token -> player index), assigned at start in join order.
+// A seat is keyed by token, so it carries across reconnects and stays reserved
+// while its player is disconnected.
 const games = new Map();
 
 const MAX_PLAYERS = 6;
 // The game's colour set is the single source of truth for lobby colours too.
 const COLORS = E.DEFAULT_COLORS;
 
-// Members of a room in join order, or [] if the room is unknown.
+// Grace window (ms) after a socket drops before the slot/seat is treated as a
+// real departure. A refresh reconnects well within this; a genuine leave waits
+// it out. About 10–15s per the resilience design.
+const GRACE_MS = 12000;
+
+// Slots of a room in join order, or [] if the room is unknown.
 function membersOf(room) {
   return roster.has(room) ? Array.from(roster.get(room).values()) : [];
 }
@@ -76,7 +95,8 @@ function canStart(room) {
 }
 
 // The full lobby state every client renders from. Broadcast on every change so
-// the lobby stays consistent and live for everyone.
+// the lobby stays consistent and live for everyone. A player's identity here is
+// their TOKEN (sent as `id`), which the client matches against its own token.
 function lobbyState(room) {
   const members = membersOf(room);
   return {
@@ -100,6 +120,67 @@ function broadcastLobby(room) {
 function broadcastState(room) {
   const entry = games.get(room);
   if (entry) io.to(room).emit('state', entry.game);
+}
+
+// Send the current full game state plus the player's own seat to one socket, so
+// a reconnecting player drops straight back into the live board where it stands.
+function sendGameTo(socketId, room, token) {
+  const entry = games.get(room);
+  if (!entry) return;
+  io.to(socketId).emit('state', entry.game);
+  const seat = entry.seats.get(token);
+  if (seat !== undefined) io.to(socketId).emit('seat', seat);
+}
+
+// A slot's grace window expired with no reconnect — treat it as a real
+// departure. In a running game the seat stays RESERVED (we keep the slot so a
+// later reconnect by token still reclaims it); only an empty room is cleaned up.
+// In the lobby the slot is removed (its section disappears for everyone), and if
+// the host left, the host transfers to the earliest-joined remaining slot.
+function onGraceExpired(room, token) {
+  const slots = roster.get(room);
+  if (!slots) return;
+  const slot = slots.get(token);
+  if (!slot || slot.socketId) return;   // gone already, or reconnected meanwhile
+
+  slot.graceTimer = null;
+
+  if (games.has(room)) {
+    // Running game: keep the seat reserved and the game going for everyone else.
+    // Only tear the room down once nobody is connected to it any more.
+    const anyConnected = Array.from(slots.values()).some((s) => s.socketId);
+    if (!anyConnected) {
+      slots.forEach((s) => { if (s.graceTimer) clearTimeout(s.graceTimer); });
+      roster.delete(room);
+      hosts.delete(room);
+      games.delete(room);
+      console.log(`room "${room}" emptied — game cleaned up`);
+    }
+    return;
+  }
+
+  // Lobby: a genuine departure removes the slot.
+  const wasHost = hosts.get(room) === token;
+  slots.delete(token);
+
+  if (slots.size === 0) {
+    roster.delete(room);
+    hosts.delete(room);
+    games.delete(room);
+    console.log(`room "${room}" emptied`);
+    return;
+  }
+
+  if (wasHost) {
+    // Transfer host to the longest-connected remaining player: the earliest-
+    // joined slot still connected, or just the earliest if none is connected.
+    const remaining = Array.from(slots.values());
+    const next = remaining.find((s) => s.socketId) || remaining[0];
+    hosts.set(room, next.id);
+    console.log(`host of room "${room}" transferred to "${next.name}"`);
+  }
+
+  broadcastLobby(room);
 }
 
 /* --------------------------------------------------------------------------
@@ -259,72 +340,100 @@ function handleAction(game, seat, msg) {
 io.on('connection', (socket) => {
   console.log(`socket connected: ${socket.id}`);
 
-  // The room this socket has joined (so we can clean it up on disconnect).
+  // The room and TOKEN this socket has claimed (so we can find its slot on
+  // every message and on disconnect). Both are set on a successful join.
   let joinedRoom = null;
+  let myToken = null;
 
   socket.on('join', (payload) => {
     const data = payload || {};
     const room = typeof data.room === 'string' ? data.room.trim() : '';
-    if (!room) return;
+    const token = typeof data.token === 'string' ? data.token.trim() : '';
+    if (!room || !token) return;
 
-    // If this socket was already in a different room, leave it first.
+    // If this socket was already in a different room, leave it first (rare — the
+    // client's room is fixed per page). Drop its slot there immediately.
     if (joinedRoom && joinedRoom !== room) {
-      socket.leave(joinedRoom);
-      const prev = roster.get(joinedRoom);
-      if (prev) {
-        prev.delete(socket.id);
-        if (prev.size === 0) { roster.delete(joinedRoom); hosts.delete(joinedRoom); }
-        else broadcastLobby(joinedRoom);
+      const prevRoom = joinedRoom, prevToken = myToken;
+      socket.leave(prevRoom);
+      const prev = roster.get(prevRoom);
+      const prevSlot = prev && prev.get(prevToken);
+      if (prevSlot && prevSlot.socketId === socket.id) {
+        if (prevSlot.graceTimer) clearTimeout(prevSlot.graceTimer);
+        prevSlot.socketId = null;
+        onGraceExpired(prevRoom, prevToken);
       }
+      joinedRoom = null;
+      myToken = null;
     }
 
-    // Already in this room (e.g. a duplicate join) — nothing to add.
-    if (roster.has(room) && roster.get(room).has(socket.id)) {
-      socket.emit('lobby', lobbyState(room));
+    socket.join(room);
+    joinedRoom = room;
+    myToken = token;
+
+    const slots = roster.get(room);
+
+    // RECONNECT: a join whose token matches an existing slot reclaims that slot.
+    // Re-attach the new socket; the player keeps their name, colour, host status
+    // and (if the game has started) their seat, and is sent the current state.
+    if (slots && slots.has(token)) {
+      const slot = slots.get(token);
+      if (slot.graceTimer) { clearTimeout(slot.graceTimer); slot.graceTimer = null; }
+      slot.socketId = socket.id;
+      console.log(`socket ${socket.id} reconnected to room "${room}" as "${slot.name}"`);
+
+      if (games.has(room)) {
+        // Drop straight back into the live board where it stands.
+        sendGameTo(socket.id, room, token);
+      } else {
+        socket.emit('lobby', lobbyState(room));
+      }
+      // Keep everyone consistent (host/roster unchanged, but harmless to resend).
+      broadcastLobby(room);
       return;
     }
 
-    // A game already running: let the joiner watch (no seat until reconnection
-    // support lands), but they do not enter the lobby roster.
+    // NEW player (no token match). If a game is already running and we don't
+    // recognise the token, they cannot be seated — spectators are out of scope.
     if (games.has(room)) {
-      socket.join(room);
-      joinedRoom = room;
-      socket.emit('state', games.get(room).game);
-      const seat = games.get(room).seats.get(socket.id);
-      if (seat !== undefined) socket.emit('seat', seat);
+      socket.emit('gameInProgress');
       return;
     }
 
     // Room full: do NOT seat a 7th player — tell them so they can show a
     // "Room is full" message instead of the lobby.
-    if (membersOf(room).length >= MAX_PLAYERS) {
+    if (slots && slots.size >= MAX_PLAYERS) {
       socket.emit('roomFull');
       return;
     }
 
-    socket.join(room);
-    joinedRoom = room;
-
     if (!roster.has(room)) roster.set(room, new Map());
-    // The first person to join becomes (and stays) the host.
-    if (!hosts.has(room)) hosts.set(room, socket.id);
+    // The first person to join becomes (and stays) the host until they leave.
+    if (!hosts.has(room)) hosts.set(room, token);
 
     // Assign a unique default name and colour; these count as the player's
     // chosen name/colour unless they change them.
     const name = defaultName(room);
     const color = defaultColor(room);
-    roster.get(room).set(socket.id, { id: socket.id, name, color });
+    roster.get(room).set(token, { id: token, name, color, socketId: socket.id, graceTimer: null });
 
     console.log(`socket ${socket.id} joined room "${room}" as "${name}"`);
     broadcastLobby(room);
   });
 
+  // Find this socket's own slot in its room, or null. Guards every owner action.
+  function mySlot() {
+    if (!joinedRoom || !myToken) return null;
+    const slots = roster.get(joinedRoom);
+    return (slots && slots.get(myToken)) || null;
+  }
+
   // Change this socket's own name. Names must be non-empty and unique
   // (case-sensitive). A duplicate is rejected and the previous name kept.
   socket.on('setName', (payload) => {
     const room = joinedRoom;
-    if (!room || !roster.has(room) || games.has(room)) return;
-    const me = roster.get(room).get(socket.id);
+    if (!room || games.has(room)) return;
+    const me = mySlot();
     if (!me) return;
 
     const name = (typeof payload === 'object' && payload && typeof payload.name === 'string')
@@ -335,7 +444,7 @@ io.on('connection', (socket) => {
       return;
     }
     // Case-sensitive uniqueness against every OTHER player.
-    const clash = membersOf(room).some((m) => m.id !== socket.id && m.name === name);
+    const clash = membersOf(room).some((m) => m.id !== myToken && m.name === name);
     if (clash) {
       socket.emit('nameRejected', { reason: 'taken' });
       return;
@@ -348,13 +457,13 @@ io.on('connection', (socket) => {
   // currently held by another player.
   socket.on('setColor', (payload) => {
     const room = joinedRoom;
-    if (!room || !roster.has(room) || games.has(room)) return;
-    const me = roster.get(room).get(socket.id);
+    if (!room || games.has(room)) return;
+    const me = mySlot();
     if (!me) return;
 
     const color = (typeof payload === 'object' && payload) ? payload.color : null;
     if (!COLORS.includes(color)) return;
-    const clash = membersOf(room).some((m) => m.id !== socket.id && m.color === color);
+    const clash = membersOf(room).some((m) => m.id !== myToken && m.color === color);
     if (clash) return;            // taken — silently ignore (its swatch is disabled client-side)
     me.color = color;
     broadcastLobby(room);
@@ -365,15 +474,15 @@ io.on('connection', (socket) => {
   socket.on('startGame', () => {
     const room = joinedRoom;
     if (!room || !roster.has(room)) return;
-    if (hosts.get(room) !== socket.id) return;               // host only
+    if (hosts.get(room) !== myToken) return;                 // host only
     const existing = games.get(room);
     if (existing && existing.game.phase !== 'over') return;  // already running
     if (!canStart(room)) return;                             // conditions not met
 
     const members = membersOf(room);                         // join order
 
-    // Size the game to the connected players, using each player's chosen name
-    // and colour, seated in join order.
+    // Size the game to the players, using each player's chosen name and colour,
+    // seated in join order.
     const game = E.createGame({
       nPlayers: members.length,
       names: members.map((m) => m.name),
@@ -382,16 +491,17 @@ io.on('connection', (socket) => {
     game.gameId = room + ':' + Date.now();   // lets clients detect a fresh board
     E.beginSetupTurn(game);
 
-    // Assign each connected socket a seat (player index) in join order.
+    // Assign each player a seat (player index) BY TOKEN in join order, so the
+    // seat carries across reconnects.
     const seats = new Map();
     members.forEach((m, i) => seats.set(m.id, i));
     games.set(room, { game, seats });
 
     console.log(`game started in room "${room}" with ${members.length} players`);
 
-    // Broadcast the initial full state, then tell each socket its own seat.
+    // Broadcast the initial full state, then tell each connected socket its seat.
     io.to(room).emit('state', game);
-    seats.forEach((idx, sid) => io.to(sid).emit('seat', idx));
+    members.forEach((m, i) => { if (m.socketId) io.to(m.socketId).emit('seat', i); });
   });
 
   // A player action: { type, ...params }. Validate against the engine, apply,
@@ -401,7 +511,7 @@ io.on('connection', (socket) => {
     if (!room) return;
     const entry = games.get(room);
     if (!entry) return;
-    const seat = entry.seats.get(socket.id);
+    const seat = entry.seats.get(myToken);
     if (seat === undefined) return;          // no seat → spectator, can't act
 
     let changed = false;
@@ -418,22 +528,19 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', (reason) => {
     console.log(`socket disconnected: ${socket.id} (${reason})`);
-    if (joinedRoom && roster.has(joinedRoom)) {
-      const members = roster.get(joinedRoom);
-      members.delete(socket.id);
-      if (members.size === 0) {
-        // Last one out: drop the roster, host and any game so a later visit to
-        // this (now empty) room starts clean. Seats are NOT reshuffled while
-        // anyone is still connected — a disconnected seat simply stays reserved.
-        roster.delete(joinedRoom);
-        hosts.delete(joinedRoom);
-        games.delete(joinedRoom);
-      } else {
-        // Their lobby section vanishes for everyone immediately. (Host-transfer
-        // when the host is the one who left is intentionally out of scope.)
-        broadcastLobby(joinedRoom);
-      }
-    }
+    const room = joinedRoom, token = myToken;
+    if (!room || !roster.has(room)) return;
+    const slots = roster.get(room);
+    const slot = slots.get(token);
+    // Ignore a stale socket (e.g. a second tab that was already superseded).
+    if (!slot || slot.socketId !== socket.id) return;
+
+    // Don't destroy the slot/seat immediately — mark it disconnected and start a
+    // short grace timer. A re-join with this token within the window re-attaches
+    // seamlessly; if it expires, onGraceExpired treats it as a real departure.
+    slot.socketId = null;
+    if (slot.graceTimer) clearTimeout(slot.graceTimer);
+    slot.graceTimer = setTimeout(() => onGraceExpired(room, token), GRACE_MS);
   });
 });
 
