@@ -301,6 +301,11 @@
   .btn.primary{background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark); border-color:var(--gold-deep);}
   .btn.span2{grid-column:span 2;}
   .btn .cost{display:block; font-weight:400; font-size:9px; letter-spacing:.3px; opacity:.85; margin-top:1px;}
+  /* Cost buttons: name on the left, row of resource-card icons on the right, same line. */
+  .btn.btn-cost{display:flex; align-items:center; justify-content:space-between; gap:8px; text-align:left;}
+  .btn.btn-cost .btn-name{flex:0 1 auto;}
+  .btn.btn-cost .btn-cards{display:flex; align-items:center; gap:3px; flex:0 0 auto;}
+  .btn.btn-cost .btn-cards .res-card{margin:0; display:block;}
   .btn.cancel{background:transparent; color:#9c3b30; border-color:#9c3b30;}
   .seg-group{display:inline-flex; border:1px solid rgba(107,79,46,.35); border-radius:8px; overflow:hidden;}
   .seg{font-family:'Outfit',sans-serif; font-size:11px; cursor:pointer; background:rgba(255,255,255,.30);
@@ -1724,10 +1729,19 @@ function renderPrompt(){
 }
 function renderActions(){
   const box=$("actions"); box.innerHTML="";
-  const mk=(label,cls,handler,disabled,sub)=>{
+  // `cards` (optional) is an array of resource keys; when given, the button shows
+  // the resource-card icons (one per unit) on the right, reusing the same #rcard-*
+  // component as the Rules panel's Building-costs table.
+  const mk=(label,cls,handler,disabled,sub,cards)=>{
     const b=document.createElement("button");
     b.className="btn "+cls; b.disabled=!!disabled;
-    b.innerHTML=label+(sub?`<span class="cost">${sub}</span>`:"");
+    if(cards){
+      b.classList.add("btn-cost");
+      const icons=cards.map(r=>`<svg class="res-card" width="14" height="20" aria-label="${RES_LABEL[r]}"><use href="#rcard-${r}"/></svg>`).join("");
+      b.innerHTML=`<span class="btn-name">${label}</span><span class="btn-cards">${icons}</span>`;
+    } else {
+      b.innerHTML=label+(sub?`<span class="cost">${sub}</span>`:"");
+    }
     if(!disabled) b.addEventListener("click",handler); box.appendChild(b); return b;
   };
   if(S.phase==="setup"){
@@ -1741,13 +1755,13 @@ function renderActions(){
   const canAct=canActNow()&&mine;
   const p=S.cur;
   mk("Roll dice","primary span2",rollDice,!mine||S.hasRolled||S.pendingRobber);
-  mk("Build road","",()=>tryMode("road"),!canAct,"1 wood · 1 brick");
-  mk("Build settlement","",()=>tryMode("settlement"),!canAct,"wood·brick·sheep·wheat");
-  mk("Build city","",()=>tryMode("city"),!canAct,"3 ore · 2 wheat");
+  mk("Build road","",()=>tryMode("road"),!canAct,null,["wood","brick"]);
+  mk("Build settlement","",()=>tryMode("settlement"),!canAct,null,["wood","brick","sheep","wheat"]);
+  mk("Build city","",()=>tryMode("city"),!canAct,null,["ore","ore","ore","wheat","wheat"]);
   mk("Trade","",openTrade,!canAct,"bank · harbour");
   const deckEmpty=S.deck.length===0;
   mk("Buy dev card","",buyDev,!canAct||deckEmpty||!canAfford(p,COST.dev),
-    deckEmpty?"deck empty":"1 ore · 1 wheat · 1 sheep");
+    deckEmpty?"deck empty":null, deckEmpty?null:["ore","wheat","sheep"]);
   // Only my own hand is known to me; the play button is enabled only on my turn,
   // so compute playable dev cards just for that case (opponents send no `dev`).
   const playable=mine?DEV_TYPES.reduce((s,t)=>s+(S.players[p].dev[t]-S.players[p].devNew[t]),0):0;
