@@ -137,6 +137,10 @@ function viewFor(game, seat) {
   // never sent. Clients only need its remaining length (e.g. "deck empty").
   view.deck = game.deck.map(() => 0);
 
+  // Remaining development cards left to buy — a public count (like the bank
+  // resource counts), never which cards remain.
+  view.devDeckRemaining = game.deck.length;
+
   view.players = game.players.map((pl) => {
     const mine = pl.i === seat;
     const out = {
