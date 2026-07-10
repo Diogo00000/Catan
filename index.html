@@ -1636,7 +1636,12 @@ function renderDice(){
 function renderPlayers(){
   const box=$("players"); box.innerHTML="";
   const bumpOk=!reduceMotion()&&FX.prevRes;
-  S.players.forEach(pl=>{
+  // Presentation only: show the LOCAL player's own card first (top), then the
+  // remaining players in their normal seat order. This never touches S.players,
+  // seat indices, turn order or FX.prevRes (all keyed by pl.i) — it just reorders
+  // which cards get appended, so a player seated later still finds their card up top.
+  const ordered=S.players.filter(pl=>pl.i===me).concat(S.players.filter(pl=>pl.i!==me));
+  ordered.forEach(pl=>{
     const active=(pl.i===S.cur);
     const isMe=(pl.i===me);
     // The "you" treatment is PERMANENT (it never depends on whose turn it is); the
