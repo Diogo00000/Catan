@@ -1788,6 +1788,10 @@ function renderBank(){
     const cls="bank-chip"+(n===0?" out":(n<=2?" low":""));
     html+=`<span class="${cls}" style="background:${TILE_COLORS[r]};${dark?'color:#3a2e10;':''}" title="${RES_LABEL[r]} left in the bank"><span class="bc-lab">${RES_SHORT[r]}</span>${n}</span>`;
   });
+  // Development cards left to buy — public count, sits to the right of the resource piles.
+  const dn=(S.devDeckRemaining!=null)?S.devDeckRemaining:(S.deck?S.deck.length:0);
+  const dcls="bank-chip"+(dn===0?" out":(dn<=2?" low":""));
+  html+=`<span class="${dcls}" style="background:#5a4a7a;" title="Development cards left to buy"><span class="bc-lab">Dev</span>${dn}</span>`;
   box.innerHTML=html;
 }
 /* ---------------- Live statistics view ---------------- */
