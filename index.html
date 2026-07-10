@@ -288,6 +288,31 @@
   .pc-token svg{width:12px; height:12px; flex:0 0 auto; opacity:.85;}
   .pc-token .dot{width:9px; height:9px; border-radius:50%; flex:0 0 auto; border:1px solid rgba(0,0,0,.22);}
 
+  /* 4b) LOCAL player's footer — Ports | Devs, two equal halves split by a divider
+     that matches the stats-row separators. Same clipped top divider as .pc-ports. */
+  .pc-footer{position:relative; display:flex; background:var(--pc-band); border-radius:10px;}
+  .pc-footer::before{content:""; position:absolute; top:-4px; left:14px; right:14px; height:1px;
+    background:rgba(214,193,150,.9); border-radius:1px;}
+  .pc-half{flex:1 1 0; min-width:0; padding:7px 10px; display:flex; flex-direction:column; align-items:center; gap:6px;}
+  .pc-half + .pc-half{border-left:1px solid rgba(107,79,46,.18);}
+  /* Same styling as the original "Ports" label, now centred at the top of each half. */
+  .pc-half-lab{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
+    font-weight:700; text-align:center;}
+  .pc-half .pc-tokens,.pc-devs{display:flex; flex-wrap:wrap; gap:5px; justify-content:center; width:100%;}
+  /* Small dev cards — compact violet cards that fit the parchment theme. */
+  .pc-dev{position:relative; display:inline-flex; flex-direction:column; align-items:center; gap:1px;
+    background:linear-gradient(180deg,#7d61ab,#5f4589); color:#f4eeff;
+    border:1px solid #48356a; border-radius:8px; padding:4px 7px 3px; min-width:38px;
+    box-shadow:0 1px 1.5px rgba(0,0,0,.18);}
+  .pc-dev-ic{display:inline-flex; align-items:center; gap:2px; line-height:1;}
+  .pc-dev-ic svg{width:16px; height:16px; flex:0 0 auto;}
+  .pc-dev-x{font-family:'Cinzel',serif; font-weight:700; font-size:10px;}
+  .pc-dev-nm{font-size:8px; font-weight:600; letter-spacing:.3px; text-transform:uppercase; opacity:.92;}
+  .pc-dev-ct{position:absolute; top:-6px; right:-6px; min-width:15px; height:15px; padding:0 3px;
+    display:inline-flex; align-items:center; justify-content:center; border-radius:8px;
+    background:linear-gradient(180deg,var(--gold),var(--gold-deep)); color:var(--wood-dark);
+    border:1px solid var(--gold-deep); font-family:'Cinzel',serif; font-weight:700; font-size:9.5px; line-height:1;}
+
   /* Actions */
   .prompt{font-size:13px; line-height:1.5; color:var(--ink); background:rgba(107,79,46,.10);
     border-left:3px solid var(--gold-deep); border-radius:6px; padding:9px 11px; min-height:38px;}
@@ -842,6 +867,20 @@ const PC_ICONS={
   knight:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M5 10a7 7 0 0 1 14 0v6a2 2 0 0 1-2 2h-2v2.5h-4V18H7a2 2 0 0 1-2-2z"/><path d="M5.3 10.5h13.4"/><path d="M11 13v4M13.5 13v4"/></svg>`,
   // Generic 3:1 port — an anchor
   anchor:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M12 7v14"/><path d="M5 13a7 7 0 0 0 14 0"/><path d="M3.5 13H6M18 13h2.5"/></svg>`,
+  // Victory Point dev card — a trophy cup on a plinth
+  trophy:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 5.5H4.2v1.6a3 3 0 0 0 3 3M17 5.5h2.8v1.6a3 3 0 0 1-3 3"/><path d="M12 14v3M9.5 20h5M10 20l.4-3M14 20l-.4-3"/></svg>`,
+  // Monopoly dev card — an open grabbing hand
+  grab:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11.5V6a1.5 1.5 0 0 1 3 0v4M10 10V4.7a1.5 1.5 0 0 1 3 0V10M13 10.2V6.2a1.5 1.5 0 0 1 3 0v6"/><path d="M16 9.8a1.5 1.5 0 0 1 3 0v3.2a7 7 0 0 1-7 7 6 6 0 0 1-5-2.6L4.4 14a1.6 1.6 0 0 1 2.5-2l1.1 1.3"/></svg>`,
+};
+// Small dev-card metadata for the LOCAL player's own hand (right half of the card
+// footer). `pre` prints before the icon (the "2x" on the two-action cards); the
+// road / cards icons are reused verbatim from the stats row for visual consistency.
+const DEV_META={
+  knight:{icon:PC_ICONS.knight, label:"Knight"},
+  vp:{icon:PC_ICONS.trophy, label:"VP"},
+  mono:{icon:PC_ICONS.grab, label:"Mono"},
+  road:{icon:PC_ICONS.road, label:"Roads", pre:"2x"},
+  plenty:{icon:PC_ICONS.cards, label:"Plenty", pre:"2x"},
 };
 // Available player colours — each may be picked by only one player.
 const PALETTE=[
@@ -1680,6 +1719,37 @@ function renderPlayers(){
     if(hTypes.has("3:1")) tokens+=`<span class="pc-token" title="Generic 3:1 port">${PC_ICONS.anchor} 3:1 Any</span>`;
     RES_ORDER.forEach(r=>{ if(hTypes.has(r)) tokens+=`<span class="pc-token" title="2:1 ${RES_SHORT[r]} port"><span class="dot" style="background:${TILE_COLORS[r]}"></span> 2:1 ${PORT_SHORT[r]}</span>`; });
     const devHeld=devCount(pl.i);
+    const portsInner=`<span class="pc-ports-lab">Ports</span>${tokens?`<span class="pc-tokens">${tokens}</span>`:""}`;
+    // Footer below the double divider. Opponents keep the plain Ports strip; the
+    // LOCAL player gets a split section — Ports on the left, their own dev hand on
+    // the right (grouped by type, one small card each, count badge when >1).
+    let footer;
+    if(isMe){
+      let devCards="";
+      DEV_ALL.forEach(t=>{
+        const n=pl.dev?pl.dev[t]:0;
+        if(!n) return;
+        const m=DEV_META[t];
+        devCards+=`<span class="pc-dev" title="${DEV_NAME[t]}">`+
+          (n>1?`<span class="pc-dev-ct">${n}</span>`:"")+
+          `<span class="pc-dev-ic">${m.pre?`<span class="pc-dev-x">${m.pre}</span>`:""}${m.icon}</span>`+
+          `<span class="pc-dev-nm">${m.label}</span></span>`;
+      });
+      footer=`
+      <div class="pc-footer">
+        <div class="pc-half">
+          <div class="pc-half-lab">Ports</div>
+          ${tokens?`<div class="pc-tokens">${tokens}</div>`:""}
+        </div>
+        <div class="pc-half">
+          <div class="pc-half-lab">Devs</div>
+          ${devCards?`<div class="pc-devs">${devCards}</div>`:""}
+        </div>
+      </div>`;
+    } else {
+      footer=`
+      <div class="pc-ports">${portsInner}</div>`;
+    }
     card.innerHTML=`
       <div class="pc-head">
         <span class="pc-swatch" style="background:${PLAYER_COLORS[pl.i]}"></span>
@@ -1695,10 +1765,7 @@ function renderPlayers(){
         <span class="pc-stat" title="Development cards held">${PC_ICONS.dev}<b>${devHeld}</b> dev</span>
         <span class="pc-stat" title="Knights played">${PC_ICONS.knight}<b>${pl.playedKnights}</b> knights</span>
       </div>
-      <div class="pc-ports">
-        <span class="pc-ports-lab">Ports</span>
-        ${tokens?`<span class="pc-tokens">${tokens}</span>`:""}
-      </div>`;
+      ${footer}`;
     box.appendChild(card);
   });
   // Remember the live counts so the next render can detect (and bump) increases.
