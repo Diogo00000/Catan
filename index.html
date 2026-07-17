@@ -298,11 +298,26 @@
   /* Same styling as the original "Ports" label, now centred at the top of each half. */
   .pc-half-lab{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
     font-weight:700; text-align:center;}
-  .pc-half .pc-tokens,.pc-devs{display:flex; flex-wrap:wrap; gap:5px; justify-content:center; width:100%;}
-  /* Small dev cards — compact violet cards that fit the parchment theme. */
-  .pc-dev{position:relative; display:inline-flex; flex-direction:column; align-items:center; gap:1px;
+  /* Item rows for the LOCAL player's own card. Chips keep their own fixed size and never
+     stretch; the block is capped to exactly three chips wide, so items wrap into up to two
+     centred rows of three (1st–3rd on row 1, the rest on row 2) whatever the panel width. */
+  .pc-half .pc-tokens,.pc-devs{display:flex; flex-wrap:wrap; gap:5px; justify-content:center;
+    align-items:flex-start; align-content:flex-start; flex:0 0 auto; width:100%; max-width:156px;}
+  /* Port chip — a fixed-size badge in the resource's board colour carrying that resource's
+     port-disc icon, followed by the ratio. No resource name/abbreviation. */
+  .pc-port{flex:0 0 auto; box-sizing:border-box; width:48px; height:24px;
+    display:inline-flex; align-items:center; gap:3px; padding-right:4px;
+    background:rgba(255,255,255,.45); border:1px solid rgba(107,79,46,.28); border-radius:8px;
+    font-family:'Cinzel',serif; font-weight:700; font-size:10px; color:var(--ink-soft);}
+  .pc-port-badge{flex:0 0 auto; width:20px; height:20px; margin:1px; border-radius:5px;
+    display:inline-flex; align-items:center; justify-content:center; border:1px solid rgba(0,0,0,.22);}
+  .pc-port-badge svg{width:14px; height:14px;}
+  /* Small dev cards — compact violet cards that fit the parchment theme. Fixed width so
+     they, too, never stretch to fill the column. */
+  .pc-dev{position:relative; flex:0 0 auto; box-sizing:border-box; width:48px;
+    display:inline-flex; flex-direction:column; align-items:center; gap:1px;
     background:linear-gradient(180deg,#7d61ab,#5f4589); color:#f4eeff;
-    border:1px solid #48356a; border-radius:8px; padding:4px 7px 3px; min-width:38px;
+    border:1px solid #48356a; border-radius:8px; padding:4px 5px 3px;
     box-shadow:0 1px 1.5px rgba(0,0,0,.18);}
   .pc-dev-ic{display:inline-flex; align-items:center; gap:2px; line-height:1;}
   .pc-dev-ic svg{width:16px; height:16px; flex:0 0 auto;}
@@ -871,6 +886,16 @@ const PC_ICONS={
   trophy:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 5.5H4.2v1.6a3 3 0 0 0 3 3M17 5.5h2.8v1.6a3 3 0 0 1-3 3"/><path d="M12 14v3M9.5 20h5M10 20l.4-3M14 20l-.4-3"/></svg>`,
   // Monopoly dev card — an open grabbing hand
   grab:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11.5V6a1.5 1.5 0 0 1 3 0v4M10 10V4.7a1.5 1.5 0 0 1 3 0V10M13 10.2V6.2a1.5 1.5 0 0 1 3 0v6"/><path d="M16 9.8a1.5 1.5 0 0 1 3 0v3.2a7 7 0 0 1-7 7 6 6 0 0 1-5-2.6L4.4 14a1.6 1.6 0 0 1 2.5-2l1.1 1.3"/></svg>`,
+};
+// Resource icons for the LOCAL player's port chips — HTML-string versions of the very
+// same shapes drawn onto the board's port discs (drawPortIcon), in currentColor so each
+// picks up the light/dark ink chosen for its badge.
+const RES_PORT_ICONS={
+  wood:`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 5.5 12H18.5z"/><path d="M12 7 5 17h14z"/><rect x="10.5" y="16" width="3" height="6"/></svg>`,
+  brick:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v10H4z"/><path d="M4 12h16"/><path d="M12 7v5"/><path d="M8 12v5"/><path d="M16 12v5"/></svg>`,
+  sheep:`<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="10.5" cy="13" rx="6.2" ry="4.6"/><circle cx="17" cy="11.5" r="2.6"/><path d="M8 17v3M13 17v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  wheat:`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21 9 9M12 21V8M12 21l3-12M9 16h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="9" cy="6.5" rx="1.7" ry="3.2" transform="rotate(-14 9 6.5)"/><ellipse cx="12" cy="5.5" rx="1.7" ry="3.2"/><ellipse cx="15" cy="6.5" rx="1.7" ry="3.2" transform="rotate(14 15 6.5)"/></svg>`,
+  ore:`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 20 9 7l4 7 3-5 6 11z"/></svg>`,
 };
 // Small dev-card metadata for the LOCAL player's own hand (right half of the card
 // footer). `pre` prints before the icon (the "2x" on the two-action cards); the
@@ -1725,6 +1750,15 @@ function renderPlayers(){
     // the right (grouped by type, one small card each, count badge when >1).
     let footer;
     if(isMe){
+      // Port chips — generic 3:1 always first, then the 2:1 ports in resource order. Each is a
+      // resource-coloured (or tan, for 3:1) square badge with its board port icon, then the ratio.
+      let portChips="";
+      if(hTypes.has("3:1"))
+        portChips+=`<span class="pc-port" title="Generic 3:1 port"><span class="pc-port-badge" style="background:#e8d3a6;color:#2c2117">${PC_ICONS.anchor}</span>3:1</span>`;
+      RES_ORDER.forEach(r=>{ if(hTypes.has(r)){
+        const dark=(r==='sheep'||r==='wheat');   // light badges take dark ink; darker badges take cream
+        portChips+=`<span class="pc-port" title="2:1 ${RES_LABEL[r]} port"><span class="pc-port-badge" style="background:${TILE_COLORS[r]};color:${dark?'#2c2117':'#f5ecd8'}">${RES_PORT_ICONS[r]}</span>2:1</span>`;
+      }});
       let devCards="";
       DEV_ALL.forEach(t=>{
         const n=pl.dev?pl.dev[t]:0;
@@ -1739,7 +1773,7 @@ function renderPlayers(){
       <div class="pc-footer">
         <div class="pc-half">
           <div class="pc-half-lab">Ports</div>
-          ${tokens?`<div class="pc-tokens">${tokens}</div>`:""}
+          ${portChips?`<div class="pc-tokens">${portChips}</div>`:""}
         </div>
         <div class="pc-half">
           <div class="pc-half-lab">Devs</div>
