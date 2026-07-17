@@ -275,21 +275,12 @@
   .pc-stat svg{width:15px; height:15px; flex:0 0 auto; opacity:.85;}
   .pc-stat b{font-family:'Cinzel',serif; color:var(--wood-dark); font-weight:700; font-size:12.5px;}
 
-  /* 4) Ports — same beige body, with a thin clipped divider above it */
-  .pc-ports{position:relative; display:flex; align-items:flex-start; gap:8px; padding:7px 10px; background:var(--pc-band); border-radius:10px; flex-wrap:wrap;}
-  .pc-ports::before{content:""; position:absolute; top:-4px; left:14px; right:14px; height:1px;
-    background:rgba(214,193,150,.9); border-radius:1px;}
-  .pc-ports-lab{font-size:8.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);
-    font-weight:700; padding-top:4px; flex:0 0 auto;}
+  /* 4) Ports — chips live in a centred block on both cards. */
   .pc-tokens{display:flex; flex-wrap:wrap; gap:5px; flex:1 1 auto;}
-  .pc-token{display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600;
-    color:var(--ink-soft); background:rgba(255,255,255,.45); border:1px solid rgba(107,79,46,.28);
-    border-radius:20px; padding:2px 8px; white-space:nowrap;}
-  .pc-token svg{width:12px; height:12px; flex:0 0 auto; opacity:.85;}
-  .pc-token .dot{width:9px; height:9px; border-radius:50%; flex:0 0 auto; border:1px solid rgba(0,0,0,.22);}
 
-  /* 4b) LOCAL player's footer — Ports | Devs, two equal halves split by a divider
-     that matches the stats-row separators. Same clipped top divider as .pc-ports. */
+  /* 4b) Card footer — a beige panel split into equal halves by a divider that matches the
+     stats-row separators, with a thin clipped top divider. The LOCAL player's card uses two
+     halves (Ports | Devs); every opponent card uses a single Ports half. */
   .pc-footer{position:relative; display:flex; background:var(--pc-band); border-radius:10px;}
   .pc-footer::before{content:""; position:absolute; top:-4px; left:14px; right:14px; height:1px;
     background:rgba(214,193,150,.9); border-radius:1px;}
@@ -866,8 +857,6 @@ const {R, CX0, CY0}=E.GEO;   // geometry constants the renderer still needs
 /* ---------------- Static (presentation-only) data ---------------- */
 const TILE_COLORS={wood:"#2f6b3c",brick:"#bf6138",sheep:"#a8c459",wheat:"#e3b23c",ore:"#74808d",desert:"#d9c08c"};
 const RES_LABEL={wood:"Wood",brick:"Brick",sheep:"Sheep",wheat:"Wheat",ore:"Ore"};
-// Two-letter resource tags used on port tokens (e.g. "2:1 Wd").
-const PORT_SHORT={wood:"Wd",brick:"Br",sheep:"Sh",wheat:"Wh",ore:"Or"};
 // Self-contained monochrome SVG icons (currentColor) used on the player cards. No emoji / icon fonts.
 const PC_ICONS={
   // Longest Road award — a road segment with a dashed centre line
@@ -1697,6 +1686,23 @@ function renderDice(){
   }
   FX.diceRoll=false;
 }
+// Shared port-chip renderer — the option-4 look: one solid, fixed-size rounded chip per
+// distinct port, filled with the resource's board colour (light sheep/wheat chips take a
+// dark icon+ratio, the rest take white), the generic 3:1 rendered as a neutral tan chip
+// with an anchor. Generic 3:1 always first, then the 2:1 ports in board order
+// (wood, brick, sheep, wheat, ore). Used identically on the LOCAL player's own card and on
+// every opponent's card, so the two can never drift apart. Ports are public information.
+function portChipsHTML(pi){
+  const hTypes=new Set(playerHarbours(pi).map(h=>h.type));
+  let chips="";
+  if(hTypes.has("3:1"))
+    chips+=`<span class="pc-port" title="Generic 3:1 port" style="background:#e8d3a6;color:#2c2117">${PC_ICONS.anchor}3:1</span>`;
+  RES_ORDER.forEach(r=>{ if(hTypes.has(r)){
+    const dark=(r==='sheep'||r==='wheat');   // light chips take dark ink; darker chips take white
+    chips+=`<span class="pc-port" title="2:1 ${RES_LABEL[r]} port" style="background:${TILE_COLORS[r]};color:${dark?'#2c2117':'#ffffff'}">${RES_PORT_ICONS[r]}2:1</span>`;
+  }});
+  return chips;
+}
 function renderPlayers(){
   const box=$("players"); box.innerHTML="";
   const bumpOk=!reduceMotion()&&FX.prevRes;
@@ -1738,28 +1744,16 @@ function renderPlayers(){
         <span class="pc-fd-n">${cardsN}</span>
         <span class="pc-fd-lab">card${cardsN===1?"":"s"} in hand</span></div>`;
     }
-    // Ports — one token per distinct type, generic 3:1 first then 2:1 ports in resource order.
-    const hTypes=new Set(playerHarbours(pl.i).map(h=>h.type));
-    let tokens="";
-    if(hTypes.has("3:1")) tokens+=`<span class="pc-token" title="Generic 3:1 port">${PC_ICONS.anchor} 3:1 Any</span>`;
-    RES_ORDER.forEach(r=>{ if(hTypes.has(r)) tokens+=`<span class="pc-token" title="2:1 ${RES_SHORT[r]} port"><span class="dot" style="background:${TILE_COLORS[r]}"></span> 2:1 ${PORT_SHORT[r]}</span>`; });
+    // Ports — the same solid option-4 chips on every card (local and opponents alike),
+    // generic 3:1 first then the 2:1 ports in board order.
+    const portChips=portChipsHTML(pl.i);
     const devHeld=devCount(pl.i);
-    const portsInner=`<span class="pc-ports-lab">Ports</span>${tokens?`<span class="pc-tokens">${tokens}</span>`:""}`;
-    // Footer below the double divider. Opponents keep the plain Ports strip; the
+    // Footer below the double divider. Opponents show a single centred Ports strip; the
     // LOCAL player gets a split section — Ports on the left, their own dev hand on
-    // the right (grouped by type, one small card each, count badge when >1).
+    // the right (grouped by type, one small card each, count badge when >1). Both use the
+    // identical chip component and the same up-to-two-rows-of-three centred layout.
     let footer;
     if(isMe){
-      // Port chips — generic 3:1 always first, then the 2:1 ports in resource order. Each is a
-      // single solid chip filled with the resource's board colour (or tan, for 3:1), carrying its
-      // board port icon and the ratio in a contrasting ink.
-      let portChips="";
-      if(hTypes.has("3:1"))
-        portChips+=`<span class="pc-port" title="Generic 3:1 port" style="background:#e8d3a6;color:#2c2117">${PC_ICONS.anchor}3:1</span>`;
-      RES_ORDER.forEach(r=>{ if(hTypes.has(r)){
-        const dark=(r==='sheep'||r==='wheat');   // light chips take dark ink; darker chips take white
-        portChips+=`<span class="pc-port" title="2:1 ${RES_LABEL[r]} port" style="background:${TILE_COLORS[r]};color:${dark?'#2c2117':'#ffffff'}">${RES_PORT_ICONS[r]}2:1</span>`;
-      }});
       let devCards="";
       DEV_ALL.forEach(t=>{
         const n=pl.dev?pl.dev[t]:0;
@@ -1782,8 +1776,15 @@ function renderPlayers(){
         </div>
       </div>`;
     } else {
+      // Opponents: the same chip component and centred layout as the local card, in a
+      // single Ports half (no dev breakdown — dev cards stay a count only).
       footer=`
-      <div class="pc-ports">${portsInner}</div>`;
+      <div class="pc-footer">
+        <div class="pc-half">
+          <div class="pc-half-lab">Ports</div>
+          ${portChips?`<div class="pc-tokens">${portChips}</div>`:""}
+        </div>
+      </div>`;
     }
     card.innerHTML=`
       <div class="pc-head">
