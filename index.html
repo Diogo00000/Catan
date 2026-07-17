@@ -1874,23 +1874,23 @@ function renderActions(){
   // engine queries never run for opponents (whose hands we don't hold).
   const canBuild=(type,legal)=>!canAct||!canAfford(p,COST[type])||ownCount(p,type)>=LIMIT[type]||legal().length===0;
   // Row 1: roll — full width.
-  mk("Roll dice","primary span2",rollDice,!mine||S.hasRolled||S.pendingRobber);
+  mk("Roll Dice","primary span2",rollDice,!mine||S.hasRolled||S.pendingRobber);
   // Row 2: road + settlement.
-  mk("Build road","",()=>tryMode("road"),canBuild("road",()=>legalRoads(p,false,null)),null,["wood","brick"]);
-  mk("Build settlement","",()=>tryMode("settlement"),canBuild("settlement",()=>legalSettlements(p,false)),null,["wood","brick","sheep","wheat"]);
+  mk("Build Road","",()=>tryMode("road"),canBuild("road",()=>legalRoads(p,false,null)),null,["wood","brick"]);
+  mk("Build Settlement","",()=>tryMode("settlement"),canBuild("settlement",()=>legalSettlements(p,false)),null,["wood","brick","sheep","wheat"]);
   // Row 3: city + buy dev card.
-  mk("Build city","",()=>tryMode("city"),canBuild("city",()=>legalCities(p)),null,["ore","ore","ore","wheat","wheat"]);
+  mk("Build City","",()=>tryMode("city"),canBuild("city",()=>legalCities(p)),null,["ore","ore","ore","wheat","wheat"]);
   // Remaining development cards left to buy — a public count exposed in the state.
   const devLeft=(S.devDeckRemaining!=null)?S.devDeckRemaining:(S.deck?S.deck.length:0);
-  mk("Buy dev card","",buyDev,!canAct||devLeft<=0||!canAfford(p,COST.dev),null,["ore","wheat","sheep"]);
+  mk("Buy Dev. Card","",buyDev,!canAct||devLeft<=0||!canAfford(p,COST.dev),null,["ore","wheat","sheep"]);
   // Row 4: play dev card + trade.
   // Only my own hand is known to me; the play button is enabled only on my turn,
   // so compute playable dev cards just for that case (opponents send no `dev`).
   const playable=mine?DEV_TYPES.reduce((s,t)=>s+(S.players[p].dev[t]-S.players[p].devNew[t]),0):0;
-  mk("Play dev card","",openDevPlay,!mine||!canPlayDevNow()||S.devPlayedThisTurn||playable<=0);
-  mk("Trade","",openTrade,!canAct,"harbour · player · bank");
+  mk("Play Dev. Card","",openDevPlay,!mine||!canPlayDevNow()||S.devPlayedThisTurn||playable<=0);
+  mk("Trade","",openTrade,!canAct,"Harbour | Player | Bank");
   // Row 5: end turn — full width, alone at the bottom.
-  mk("End turn","span2",endTurn,!canAct);
+  mk("End Turn","span2",endTurn,!canAct);
   if(mine&&uiMode) mk("Cancel placement","cancel span2",cancelMode);
 }
 function renderLog(){
